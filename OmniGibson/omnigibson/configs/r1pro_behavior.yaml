@@ -39,14 +39,14 @@ scene:
 
 robots: 
   - type: R1Pro
-    obs_modalities: [rgb, depth]
+    obs_modalities: [rgb, depth, proprio]
     include_sensor_names: null
     exclude_sensor_names: null
     scale: 1.0
     self_collision: false
     action_normalize: true
     action_type: continuous
-    grasping_mode: physical
+    grasping_mode: assisted #physical
     default_reset_mode: tuck
     sensor_config:
       VisionSensor:
@@ -56,51 +56,45 @@ robots:
     controller_config:
       base:
         name: HolonomicBaseJointController
-        motor_type: velocity
-        vel_kp: 150
-        command_input_limits: default
-        command_output_limits: default
+        motor_type: position
+        command_input_limits: null
         use_impedances: false
       trunk:
         name: JointController
         motor_type: position
-        pos_kp: 150
-        command_input_limits: default
-        command_output_limits: default
-        use_impedances: false
+        command_input_limits: null
         use_delta_commands: false
+        use_impedances: false
       arm_left:
         name: JointController
         motor_type: position
-        pos_kp: 150
-        command_input_limits: default
-        command_output_limits: default
-        use_impedances: false
+        command_input_limits: null
         use_delta_commands: false
+        use_impedances: false
       arm_right:
         name: JointController
         motor_type: position
-        pos_kp: 150
-        command_input_limits: default
-        command_output_limits: default
-        use_impedances: false
+        command_input_limits: null
         use_delta_commands: false
+        use_impedances: false
       gripper_left:
-        name: MultiFingerGripperController
-        mode: smooth
-        command_input_limits: default
-        command_output_limits: default
+        name: JointController
+        motor_type: position
+        command_input_limits: null
+        use_delta_commands: false
+        use_impedances: false
       gripper_right:
-        name: MultiFingerGripperController
-        mode: smooth
-        command_input_limits: default
-        command_output_limits: default
+        name: JointController
+        motor_type: position
+        command_input_limits: null
+        use_delta_commands: false
+        use_impedances: false
 
 objects: []
 
 task:
   type: BehaviorTask
-  activity_name: picking_up_trash
+  activity_name: turning_on_radio
   activity_definition_id: 0
   activity_instance_id: 0
   predefined_problem: null

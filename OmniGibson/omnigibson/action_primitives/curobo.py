@@ -257,7 +257,14 @@ class CuRoboMotionGenerator:
                 prim, cache=self.usd_help._xform_cache, transform=robot_transform.numpy()
             )
             obstacles["mesh"].append(m)
-
+            
+        ##hack! add floor to ignore_objects
+        ignore_objects = []
+        for k,v in self.robot.scene._init_objs.items():
+            if "floor" in k:
+                ignore_objects.append(v)
+        print(ignore_objects)
+        
         for obj in self.robot.scene.objects:
             if obj == self.robot:
                 continue
@@ -265,6 +272,7 @@ class CuRoboMotionGenerator:
                 continue
             if ignore_objects is not None and obj in ignore_objects:
                 continue
+            
             for link in obj.links.values():
                 for collision_mesh in link.collision_meshes.values():
                     assert (

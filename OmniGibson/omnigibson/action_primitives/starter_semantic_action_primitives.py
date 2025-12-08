@@ -236,11 +236,24 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         # Action primitives uses assisted grasping; we ignore delayed AG here
         with macros.unlocked():
             macros.robots.manipulation_robot.GRASP_WINDOW = 0.0
-
-    @property
-    def arm(self):
+            
         assert isinstance(self.robot, ManipulationRobot), "Cannot use arm for non-manipulation robot"
-        return self.robot.default_arm
+        self.arm = self.robot.default_arm
+
+    # @property
+    # def arm(self):
+    #     assert isinstance(self.robot, ManipulationRobot), "Cannot use arm for non-manipulation robot"
+    #     return self.robot.default_arm
+    
+    def overwrite_arm(self, arm):
+        """
+        Overwrite the arm for the action primitives.
+        Args:
+            arm: Arm to overwrite.
+        Returns:
+            None.
+        """
+        self.arm = self.robot.arm_names[arm]
 
     def _postprocess_action(self, action):
         """Postprocesses action by applying head tracking."""
