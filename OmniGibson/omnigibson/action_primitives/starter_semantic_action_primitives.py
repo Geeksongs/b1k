@@ -899,6 +899,10 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         low_precision=False,
         lock_auxiliary_arm=False,
         ignore_objects=None,
+        attached_obj=None,
+        attached_obj_scale=None,
+        ik_only=False,
+        ik_world_collision_check=True,
     ):
         """
         Yields action for the robot to move hand so the eef is in the target pose using the planner
@@ -946,6 +950,10 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             embodiment_selection=CuRoboEmbodimentSelection.ARM,
             motion_constraint=motion_constraint,
             ignore_objects=ignore_objects,
+            attached_obj=attached_obj,
+            attached_obj_scale=attached_obj_scale,
+            ik_only=ik_only,
+            ik_world_collision_check=ik_world_collision_check,
         )
 
         indented_print(f"Plan has {len(q_traj)} steps")
@@ -961,10 +969,14 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         motion_constraint=None,
         skip_obstacle_update=False,
         ignore_objects=None,
+        attached_obj=None,
+        attached_obj_scale=None,
+        ik_only=False,
+        ik_world_collision_check=True,
     ):
         # If an object is grasped, we need to pass it to the motion planner
         obj_in_hand = self._get_obj_in_hand()
-        attached_obj = {self.robot.eef_link_names[self.arm]: obj_in_hand.root_link} if obj_in_hand is not None else None
+        attached_obj = {self.robot.eef_link_names[self.arm]: obj_in_hand.root_link} if obj_in_hand is not None else attached_obj
 
         # Aggregate target_pos and target_quat to match batch_size
         target_pos = {k: th.stack([v for _ in range(self._motion_generator.batch_size)]) for k, v in target_pos.items()}
@@ -988,11 +1000,11 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             return_full_result=False,
             success_ratio=1.0 / self._motion_generator.batch_size,
             attached_obj=attached_obj,
-            attached_obj_scale=None,
+            attached_obj_scale=attached_obj_scale,
             motion_constraint=motion_constraint,
             skip_obstacle_update=True,
-            ik_only=False,
-            ik_world_collision_check=True,
+            ik_only=ik_only,
+            ik_world_collision_check=ik_world_collision_check,
             emb_sel=embodiment_selection,
         )
         # Grab the first successful trajectory if found
@@ -1363,7 +1375,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             th.tensor or None: Action array for one step for the robot to move fingers or None if done.
         """
         target_joint_positions = self._get_joint_position_with_fingers_at_limit(limit_type)
-        action = self.robot.q_to_action(target_joint_positions)
+        action = self.robot.q_to_action(holonomic_base_command_in_world_frame(self.robot, target_joint_positions))
         for _ in range(m.MAX_STEPS_FOR_GRASP_OR_RELEASE):
             yield self._postprocess_action(action)
             current_joint_positions = self.robot.get_joint_positions()
@@ -2117,11 +2129,11 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             th.tensor or None: Action array for one step for the robot to do nothing
         """
         for _ in range(50):
-            empty_action = self.robot.q_to_action(self.robot.get_joint_positions())
+            empty_action = self.robot.q_to_action(holonomic_base_command_in_world_frame(self.robot, self.robot.get_joint_positions()))
             yield self._postprocess_action(empty_action)
 
         for _ in range(m.MAX_STEPS_FOR_SETTLING):
             if th.norm(self.robot.get_linear_velocity()) < 0.01:
                 break
-            empty_action = self.robot.q_to_action(self.robot.get_joint_positions())
+            empty_action = self.robot.q_to_action(holonomic_base_command_in_world_frame(self.robot, self.robot.get_joint_positions()))
             yield self._postprocess_action(empty_action)
