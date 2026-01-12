@@ -276,6 +276,20 @@ class CuRoboMotionGenerator:
         mesh_world = self.mg[emb_sel].world_model.get_mesh_world(merge_meshes=True)
         robot_world.add_obstacle(mesh_world.mesh[0])
         robot_world.save_world_as_mesh(file_path)
+        
+    def remove_obstacles(self):
+        obstacles = {"cuboid": None, "sphere": None, "mesh": [], "cylinder": None, "capsule": None}
+        robot_transform = T.pose_inv(T.pose2mat(self.robot.root_link.get_position_orientation()))
+
+        if og.sim.floor_plane is not None:
+            prim = og.sim.floor_plane.prim.GetChildren()[0]
+            m = lazy.curobo.util.usd_helper.get_mesh_attrs(
+                prim, cache=self.usd_help._xform_cache, transform=robot_transform.numpy()
+            )
+            obstacles["mesh"].append(m)
+        world = lazy.curobo.geom.types.WorldConfig(**obstacles)
+        world = world.get_collision_check_world()
+        self.mg[CuRoboEmbodimentSelection.DEFAULT].update_world(world)
 
     def update_obstacles(self, ignore_objects=None):
         """

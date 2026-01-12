@@ -133,7 +133,8 @@ def clear(
 def cleanup(*args, **kwargs):
     # TODO: Currently tempfile removal will fail due to CopyPrim command (for example, GranularSystem in dicing_apple example.)
     try:
-        shutil.rmtree(tempdir)
+        if os.path.exists(tempdir):
+            shutil.rmtree(tempdir, ignore_errors=True)
     except PermissionError:
         log.info("Permission error when removing temp files. Ignoring")
     from omnigibson.simulator import logo_small

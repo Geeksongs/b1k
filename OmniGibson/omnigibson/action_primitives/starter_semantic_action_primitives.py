@@ -903,6 +903,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         attached_obj_scale=None,
         ik_only=False,
         ik_world_collision_check=True,
+        ignore_all_obstacles=False,
     ):
         """
         Yields action for the robot to move hand so the eef is in the target pose using the planner
@@ -954,6 +955,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             attached_obj_scale=attached_obj_scale,
             ik_only=ik_only,
             ik_world_collision_check=ik_world_collision_check,
+            ignore_all_obstacles=ignore_all_obstacles,
         )
 
         indented_print(f"Plan has {len(q_traj)} steps")
@@ -973,6 +975,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         attached_obj_scale=None,
         ik_only=False,
         ik_world_collision_check=True,
+        ignore_all_obstacles=False,
     ):
         # If an object is grasped, we need to pass it to the motion planner
         obj_in_hand = self._get_obj_in_hand()
@@ -986,6 +989,9 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
 
         if not skip_obstacle_update:
             self._motion_generator.update_obstacles(ignore_objects=ignore_objects)
+            
+        if ignore_all_obstacles:
+            self._motion_generator.remove_obstacles()
 
         successes, traj_paths = self._motion_generator.compute_trajectories(
             target_pos=target_pos,
