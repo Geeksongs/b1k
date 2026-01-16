@@ -904,6 +904,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         ik_only=False,
         ik_world_collision_check=True,
         ignore_all_obstacles=False,
+        skip_obstacle_update=False,
     ):
         """
         Yields action for the robot to move hand so the eef is in the target pose using the planner
@@ -956,6 +957,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             ik_only=ik_only,
             ik_world_collision_check=ik_world_collision_check,
             ignore_all_obstacles=ignore_all_obstacles,
+            skip_obstacle_update=skip_obstacle_update,
         )
 
         indented_print(f"Plan has {len(q_traj)} steps")
@@ -1595,7 +1597,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         else:
             raise ValueError(f"Unsupported frame: {frame}")
 
-    def _navigate_to_pose(self, pose_2d, skip_obstacle_update=False):
+    def _navigate_to_pose(self, pose_2d, skip_obstacle_update=False, ignore_all_obstacles=False):
         """
         Yields the action to navigate robot to the specified 2d pose
 
@@ -1619,6 +1621,7 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             target_quat,
             embodiment_selection=CuRoboEmbodimentSelection.BASE,
             skip_obstacle_update=skip_obstacle_update,
+            ignore_all_obstacles=ignore_all_obstacles,
         )
         yield from self._execute_motion_plan(q_traj)
 
