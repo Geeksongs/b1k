@@ -15,6 +15,8 @@ env:
       sensor_kwargs:
         image_height: 480
         image_width: 480
+        horizontal_aperture: 40.0
+        focal_length: 7.0
       # position: [5.5191, 0.7886, 1.4536]
       position: [2.5191, 0.7886, 1.4536]
       orientation: [0.6549, 0.0134, 0.0154, 0.7554]
@@ -34,8 +36,8 @@ scene:
   num_waypoints: 1
   waypoint_resolution: 0.2
   load_object_categories: null
-  not_load_object_categories: null
-  # load_room_types: ["living_room"]
+  # not_load_object_categories: null
+  load_room_types: ["living_room", "kitchen", "dining_room"]
   load_room_instances: null
   load_task_relevant_only: false
   seg_map_resolution: 1.0
@@ -86,8 +88,8 @@ robots:
     sensor_config:
       VisionSensor:
         sensor_kwargs:
-          image_height: 512
-          image_width: 512
+          image_height: 256
+          image_width: 256
           # horizontal_aperture: 40
           focal_length: 10.0
 

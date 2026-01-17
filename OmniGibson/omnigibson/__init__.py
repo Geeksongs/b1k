@@ -14,11 +14,12 @@ from omnigibson.scenes import REGISTERED_SCENES
 from omnigibson.sensors import ALL_SENSOR_MODALITIES
 from omnigibson.simulator import _launch_simulator as launch
 from omnigibson.tasks import REGISTERED_TASKS
-
+from pathlib import Path
 
 # Create logger
 RESET = "\033[0m"
 
+ROBOT_ASSETS_ROOT = str(Path(__file__).parent.parent.parent.absolute() / "datasets"/ "omnigibson-robot-assets")
 
 class LogFormatter(logging.Formatter):
     COLORS = {

@@ -314,7 +314,7 @@ class CuRoboMotionGenerator:
         for k,v in self.robot.scene._init_objs.items():
             if "floor" in k:
                 ignore_objects.append(v)
-        print(ignore_objects)
+        # print(ignore_objects)
         
         for obj in self.robot.scene.objects:
             if obj == self.robot:
