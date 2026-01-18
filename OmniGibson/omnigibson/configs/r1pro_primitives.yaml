@@ -88,8 +88,8 @@ robots:
     sensor_config:
       VisionSensor:
         sensor_kwargs:
-          image_height: 256
-          image_width: 256
+          image_height: 512
+          image_width: 512
           # horizontal_aperture: 40
           focal_length: 10.0
 

@@ -282,11 +282,15 @@ class CuRoboMotionGenerator:
         robot_transform = T.pose_inv(T.pose2mat(self.robot.root_link.get_position_orientation()))
 
         if og.sim.floor_plane is not None:
-            prim = og.sim.floor_plane.prim.GetChildren()[0]
-            m = lazy.curobo.util.usd_helper.get_mesh_attrs(
-                prim, cache=self.usd_help._xform_cache, transform=robot_transform.numpy()
-            )
-            obstacles["mesh"].append(m)
+            try:
+                prim = og.sim.floor_plane.prim.GetChildren()[0]
+                m = lazy.curobo.util.usd_helper.get_mesh_attrs(
+                    prim, cache=self.usd_help._xform_cache, transform=robot_transform.numpy()
+                )
+                obstacles["mesh"].append(m)
+            except Exception as e:
+                print(f"Error adding floor plane to world collision checker: {e}")
+                continue
         world = lazy.curobo.geom.types.WorldConfig(**obstacles)
         world = world.get_collision_check_world()
         self.mg[CuRoboEmbodimentSelection.DEFAULT].update_world(world)
@@ -310,10 +314,11 @@ class CuRoboMotionGenerator:
             obstacles["mesh"].append(m)
             
         ##hack! add floor to ignore_objects
-        ignore_objects = []
-        for k,v in self.robot.scene._init_objs.items():
-            if "floor" in k:
-                ignore_objects.append(v)
+        if ignore_objects is None:
+            ignore_objects = []
+            for k,v in self.robot.scene._init_objs.items():
+                if "floor" in k:
+                    ignore_objects.append(v)
         # print(ignore_objects)
         
         for obj in self.robot.scene.objects:
@@ -325,23 +330,27 @@ class CuRoboMotionGenerator:
                 continue
             
             for link in obj.links.values():
-                for collision_mesh in link.collision_meshes.values():
-                    assert (
-                        collision_mesh.geom_type == "Mesh"
-                    ), f"collision_mesh {collision_mesh.prim_path} is not a mesh, but a {collision_mesh.geom_type}"
-                    obj_pose = T.pose2mat(collision_mesh.get_position_orientation())
-                    pose = robot_transform @ obj_pose
-                    pos, orn = T.mat2pose(pose)
-                    # xyzw -> wxyz
-                    orn = orn[[3, 0, 1, 2]]
-                    m = lazy.curobo.geom.types.Mesh(
-                        name=collision_mesh.prim_path,
-                        pose=th.cat([pos, orn]).tolist(),
-                        vertices=collision_mesh.points.numpy(),
-                        faces=collision_mesh.faces.numpy(),
-                        scale=collision_mesh.get_world_scale().numpy(),
-                    )
-                    obstacles["mesh"].append(m)
+                try:
+                    for collision_mesh in link.collision_meshes.values():
+                        assert (
+                            collision_mesh.geom_type == "Mesh"
+                        ), f"collision_mesh {collision_mesh.prim_path} is not a mesh, but a {collision_mesh.geom_type}"
+                        obj_pose = T.pose2mat(collision_mesh.get_position_orientation())
+                        pose = robot_transform @ obj_pose
+                        pos, orn = T.mat2pose(pose)
+                        # xyzw -> wxyz
+                        orn = orn[[3, 0, 1, 2]]
+                        m = lazy.curobo.geom.types.Mesh(
+                            name=collision_mesh.prim_path,
+                            pose=th.cat([pos, orn]).tolist(),
+                            vertices=collision_mesh.points.numpy(),
+                            faces=collision_mesh.faces.numpy(),
+                            scale=collision_mesh.get_world_scale().numpy(),
+                        )
+                        obstacles["mesh"].append(m)
+                except Exception as e:
+                    print(f"Error adding obstacle {collision_mesh.prim_path} to world collision checker: {e}")
+                    continue
 
         world = lazy.curobo.geom.types.WorldConfig(**obstacles)
         world = world.get_collision_check_world()
