@@ -290,7 +290,7 @@ class CuRoboMotionGenerator:
                 obstacles["mesh"].append(m)
             except Exception as e:
                 print(f"Error adding floor plane to world collision checker: {e}")
-                continue
+                
         world = lazy.curobo.geom.types.WorldConfig(**obstacles)
         world = world.get_collision_check_world()
         self.mg[CuRoboEmbodimentSelection.DEFAULT].update_world(world)
