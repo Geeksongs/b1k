@@ -981,7 +981,13 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
     ):
         # If an object is grasped, we need to pass it to the motion planner
         obj_in_hand = self._get_obj_in_hand()
-        attached_obj = {self.robot.eef_link_names[self.arm]: obj_in_hand.root_link} if obj_in_hand is not None else attached_obj
+        rl = getattr(obj_in_hand, "root_link", None)
+        attached_obj_in_hand = True
+        try:
+            rl.get_trimesh_mesh()
+        except:
+            attached_obj_in_hand = False
+        attached_obj = {self.robot.eef_link_names[self.arm]: obj_in_hand.root_link} if obj_in_hand is not None and attached_obj_in_hand else attached_obj
 
         # Aggregate target_pos and target_quat to match batch_size
         target_pos = {k: th.stack([v for _ in range(self._motion_generator.batch_size)]) for k, v in target_pos.items()}
