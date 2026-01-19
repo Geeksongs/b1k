@@ -332,6 +332,9 @@ class CuRoboMotionGenerator:
             for link in obj.links.values():
                 try:
                     for collision_mesh in link.collision_meshes.values():
+                        if collision_mesh is None:
+                            # Skip missing collision meshes to avoid None dereferences in mesh conversion.
+                            continue
                         assert (
                             collision_mesh.geom_type == "Mesh"
                         ), f"collision_mesh {collision_mesh.prim_path} is not a mesh, but a {collision_mesh.geom_type}"
