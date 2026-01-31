@@ -200,7 +200,7 @@
         <child link="torso_link1" />
         <axis xyz="0 1 0" />
         <!-- <limit lower="-1.1345" upper="1.8326" effort="100" velocity="2.5" /> -->
-        <limit lower="-0.2" upper="0.2" effort="100" velocity="2.5" />
+        <limit lower="-1" upper="1" effort="100" velocity="2.5" />
 
     </joint>
     <link name="torso_link2">
@@ -227,8 +227,8 @@
         <parent link="torso_link1" />
         <child link="torso_link2" />
         <axis xyz="0 1 0" />
-        <!-- <limit lower="-2.7925" upper="2.5307" effort="100" velocity="2.5" /> -->
-        <limit lower="-0.2" upper="0.2" effort="100" velocity="2.5" />
+        <limit lower="-2.7925" upper="2.5307" effort="100" velocity="2.5" />
+        <!-- <limit lower="-1" upper="1" effort="100" velocity="2.5" /> -->
     </joint>
     <link name="torso_link3">
         <inertial>
@@ -255,7 +255,7 @@
         <child link="torso_link3" />
         <axis xyz="0 -1 0" />
         <!-- <limit lower="-1.8326" upper="1.5708" effort="100" velocity="2.5" /> -->
-        <limit lower="-0.2" upper="0.2" effort="100" velocity="2.5" />
+        <limit lower="-1" upper="1." effort="100" velocity="2.5" />
     </joint>
     <link name="torso_link4">
         <inertial>
@@ -281,8 +281,8 @@
         <parent link="torso_link3" />
         <child link="torso_link4" />
         <axis xyz="0 0 1" />
-        <!-- <limit lower="-3.0543" upper="3.0543" effort="100" velocity="2.5" /> -->
-        <limit lower="-0.2" upper="0.2" effort="100" velocity="2.5" />
+        <limit lower="-3.0543" upper="3.0543" effort="100" velocity="2.5" />
+        <!-- <limit lower="-1" upper="1" effort="100" velocity="2.5" /> -->
     </joint>
     <link name="zed_link">
         <inertial>

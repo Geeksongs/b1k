@@ -15,8 +15,8 @@ env:
       sensor_kwargs:
         image_height: 480
         image_width: 480
-        horizontal_aperture: 50.0
-        focal_length: 10.0
+        horizontal_aperture: 40.0
+        focal_length: 7.0
       # position: [5.5191, 0.7886, 1.4536]
       position: [2.7191, 4.886, 1.4536]
       # orientation: [0.6549, 0.0134, 0.0154, 0.7554]
@@ -135,8 +135,8 @@ objects: []
 
 task:
   type: BehaviorTask
-  # activity_name: turning_on_radio
-  activity_name: picking_up_trash
+  activity_name: hanging_pictures
+  # activity_name: picking_up_trash
   activity_definition_id: 0
   activity_instance_id: 0
   predefined_problem: null
