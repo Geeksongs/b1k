@@ -62,8 +62,9 @@ fi
 # =========================
 # Install OmniGibson (editable)
 # =========================
-# echo "Installing OmniGibson (editable)..."
-# uv pip install -e "$WORKDIR/OmniGibson"
+echo "Installing OmniGibson (editable)..."
+uv pip install -e "$WORKDIR/bddl3"
+uv pip install -e "$WORKDIR/OmniGibson"
 
 # =========================
 # Isaac Sim installation
