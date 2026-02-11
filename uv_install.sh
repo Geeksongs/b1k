@@ -8,7 +8,43 @@ CUDA_VERSION="12.4"
 PYTHON_VERSION="3.10" # Isaac Sim wheels are only published for cp310
 WORKDIR=$(pwd)
 
+# Optional flags
+DATASET=false
+ACCEPT_DATASET_TOS=false
+
 export OMNI_KIT_ACCEPT_EULA=YES
+
+
+# =========================
+# Parse arguments
+# =========================
+HELP=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help) HELP=true; shift ;;
+    --dataset) DATASET=true; shift ;;
+    --accept-dataset-tos) ACCEPT_DATASET_TOS=true; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+if [ "$HELP" = true ]; then
+  cat << EOF
+Usage: ./uv_install.sh [OPTIONS]
+
+Options:
+  -h, --help              Show this help
+  --dataset               Download OmniGibson robot assets + BEHAVIOR-1K assets + 2025 challenge instances
+  --accept-dataset-tos    Auto-accept BEHAVIOR dataset license (passed to download_behavior_1k_assets)
+
+Example:
+  ./uv_install.sh --dataset --accept-dataset-tos
+EOF
+  exit 0
+fi
+
+
+
 
 # =========================
 # Sanity checks
@@ -159,3 +195,47 @@ EOF
 
 echo ""
 echo "=== OmniGibson + Isaac Sim (uv) installation complete ==="
+
+# =========================
+# Datasets (optional)
+# =========================
+if [ "$DATASET" = true ]; then
+  # Ensure we accept Isaac EULA for any OmniKit-backed downloads
+  export OMNI_KIT_ACCEPT_EULA=YES
+
+  # Ensure OmniGibson is importable in this uv env
+  uv run python -c "import omnigibson" >/dev/null 2>&1 || {
+    echo "ERROR: OmniGibson import failed. Install OmniGibson in this uv env before downloading datasets."
+    echo "       (e.g., uncomment uv pip install -e \$WORKDIR/OmniGibson and base deps / torch blocks.)"
+    exit 1
+  }
+
+  echo "Installing datasets..."
+
+  if [ "$ACCEPT_DATASET_TOS" = true ]; then
+    DATASET_ACCEPT_FLAG="True"
+  else
+    DATASET_ACCEPT_FLAG="False"
+  fi
+
+  echo "Downloading OmniGibson robot assets..."
+  uv run python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()" || {
+    echo "ERROR: OmniGibson robot assets installation failed"
+    exit 1
+  }
+
+  echo "Downloading BEHAVIOR-1K assets..."
+  uv run python -c "from omnigibson.utils.asset_utils import download_behavior_1k_assets; download_behavior_1k_assets(accept_license=${DATASET_ACCEPT_FLAG})" || {
+    echo "ERROR: BEHAVIOR-1K assets installation failed"
+    exit 1
+  }
+
+  echo "Downloading 2025 BEHAVIOR Challenge Task Instances..."
+  uv run python -c "from omnigibson.utils.asset_utils import download_2025_challenge_task_instances; download_2025_challenge_task_instances()" || {
+    echo "ERROR: 2025 BEHAVIOR Challenge Task Instances installation failed"
+    exit 1
+  }
+
+  echo "✓ Dataset installation completed"
+fi
+
