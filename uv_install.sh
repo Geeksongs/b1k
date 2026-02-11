@@ -225,6 +225,8 @@ PY
     echo "         Continuing anyway (will just reinstall assets). but you need to download it manually"
   fi
 
+  rm -rf "${ASSETS_DIR}"
+
   uv run python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()" || {
     echo "ERROR: OmniGibson robot assets installation failed"
     exit 1
@@ -258,6 +260,7 @@ fi
 # =========================
 # install curobo
 # =========================
+export GIT_LFS_SKIP_SMUDGE=1
 uv pip install nvidia_curobo@git+https://github.com/StanfordVL/curobo@cbaf7d32436160956dad190a9465360fad6aba73
 
 # =========================
