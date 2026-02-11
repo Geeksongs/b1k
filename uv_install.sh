@@ -44,8 +44,6 @@ EOF
 fi
 
 
-
-
 # =========================
 # Sanity checks
 # =========================
@@ -78,22 +76,6 @@ if [ ! -f pyproject.toml ]; then
   uv init
 fi
 
-# =========================
-# PyTorch (CUDA)
-# =========================
-# CUDA_VER_SHORT=$(echo $CUDA_VERSION | sed 's/\.//g')
-
-# echo "Installing PyTorch (CUDA ${CUDA_VERSION})..."
-# uv pip install \
-#   torch==2.6.0 \
-#   torchvision==0.21.0 \
-#   torchaudio==2.6.0 \
-#   --index-url https://download.pytorch.org/whl/cu${CUDA_VER_SHORT}
-
-# =========================
-# Base deps
-# =========================
-# uv pip install "numpy<2" "setuptools<=79" cffi==1.17.1
 
 # =========================
 # Install OmniGibson (editable)
@@ -219,10 +201,44 @@ if [ "$DATASET" = true ]; then
   fi
 
   echo "Downloading OmniGibson robot assets..."
+  set -euo pipefail
+  # 0) Resolve OmniGibson DATA_PATH from the uv environment
+  DATA_PATH="$(uv run python - <<'PY'
+from omnigibson.macros import gm
+print(gm.DATA_PATH)
+PY
+)"
+  ASSETS_DIR="${DATA_PATH}/omnigibson-robot-assets"
+  CUSTOM_REL="models/r1pro/urdf/r1pro_ik.urdf"
+  CUSTOM_SRC="${ASSETS_DIR}/${CUSTOM_REL}"
+
+  STAMP="$(date +%Y%m%d_%H%M%S)"
+  STASH_DIR="${DATA_PATH}/_custom_overlays_${STAMP}"
+  # 1) Stash the custom file (if it exists)
+  mkdir -p "${STASH_DIR}/$(dirname "${CUSTOM_REL}")"
+
+  if [ -f "${CUSTOM_SRC}" ]; then
+    echo "Stashing custom file..."
+    cp -a "${CUSTOM_SRC}" "${STASH_DIR}/${CUSTOM_REL}"
+  else
+    echo "WARNING: r1pro_ik.urdf file not found at ${CUSTOM_SRC}"
+    echo "         Continuing anyway (will just reinstall assets). but you need to download it manually"
+  fi
+
   uv run python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()" || {
     echo "ERROR: OmniGibson robot assets installation failed"
     exit 1
   }
+
+  # 4) Restore (overlay) the custom file back into the new install
+  if [ -f "${STASH_DIR}/${CUSTOM_REL}" ]; then
+    echo "Restoring custom file into fresh install..."
+    mkdir -p "${ASSETS_DIR}/$(dirname "${CUSTOM_REL}")"
+    cp -a "${STASH_DIR}/${CUSTOM_REL}" "${CUSTOM_SRC}"
+    echo "✓ Restored: ${CUSTOM_SRC}"
+  else
+    echo "NOTE: No stashed custom file to restore."
+  fi
 
   echo "Downloading BEHAVIOR-1K assets..."
   uv run python -c "from omnigibson.utils.asset_utils import download_behavior_1k_assets; download_behavior_1k_assets(accept_license=${DATASET_ACCEPT_FLAG})" || {
@@ -239,3 +255,12 @@ if [ "$DATASET" = true ]; then
   echo "✓ Dataset installation completed"
 fi
 
+# =========================
+# install curobo
+# =========================
+uv pip install nvidia_curobo@git+https://github.com/StanfordVL/curobo@cbaf7d32436160956dad190a9465360fad6aba73
+
+# =========================
+# reinstall pyroki
+# =========================
+uv pip install pyroki@git+https://github.com/chungmin99/pyroki.git
