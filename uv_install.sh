@@ -279,3 +279,43 @@ uv pip install nvidia_curobo@git+https://github.com/StanfordVL/curobo@cbaf7d3243
 # reinstall pyroki
 # =========================
 uv pip install pyroki@git+https://github.com/chungmin99/pyroki.git
+
+# =========================
+# Fix PyTorch CUDA compatibility
+# =========================
+# OmniGibson may install a newer PyTorch (cu130) that requires driver 570+.
+# Downgrade to cu124 if the installed torch targets CUDA 13.0 but the driver
+# only supports CUDA 12.x (driver < 570).
+TORCH_CUDA=$(python - 2>/dev/null <<'PY'
+try:
+    import torch
+    print(torch.version.cuda or "")
+except Exception:
+    print("")
+PY
+)
+DRIVER_MAJOR=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1 || echo "0")
+if [[ "${TORCH_CUDA}" == "13.0" && "${DRIVER_MAJOR:-0}" -lt 570 ]]; then
+  echo "Downgrading PyTorch to cu124 (driver ${DRIVER_MAJOR} < 570, torch.version.cuda=${TORCH_CUDA})..."
+  uv pip install "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" \
+    --extra-index-url https://download.pytorch.org/whl/cu124
+fi
+
+# =========================
+# Perception server dependencies
+# =========================
+# SAM3 and ContactGraspNet are perception servers used by BEHAVIOR task configs.
+# Install SAM3 from the vendored submodule and its runtime dependencies.
+CAPX_ROOT="$(cd "${WORKDIR}/../.." && pwd)"
+
+if [ -d "${CAPX_ROOT}/capx/third_party/sam3" ]; then
+  echo "Installing SAM3 perception server..."
+  uv pip install "${CAPX_ROOT}/capx/third_party/sam3" --no-deps
+  uv pip install iopath einops timm "ftfy==6.1.1" decord pycocotools
+fi
+
+# pyrender is required by ContactGraspNet scene renderer
+uv pip install pyrender
+
+# open3d is required by capx integrations (FrankaControlApi)
+uv pip install open3d
