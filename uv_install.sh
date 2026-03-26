@@ -185,10 +185,9 @@ if [ "$DATASET" = true ]; then
   # Ensure we accept Isaac EULA for any OmniKit-backed downloads
   export OMNI_KIT_ACCEPT_EULA=YES
 
-  # Ensure OmniGibson is importable in this uv env
-  uv run python -c "import omnigibson" >/dev/null 2>&1 || {
-    echo "ERROR: OmniGibson import failed. Install OmniGibson in this uv env before downloading datasets."
-    echo "       (e.g., uncomment uv pip install -e \$WORKDIR/OmniGibson and base deps / torch blocks.)"
+  # Ensure OmniGibson is importable in the current environment
+  python -c "import omnigibson" >/dev/null 2>&1 || {
+    echo "ERROR: OmniGibson import failed. Make sure OmniGibson is installed in the active venv."
     exit 1
   }
 
@@ -203,7 +202,7 @@ if [ "$DATASET" = true ]; then
   echo "Downloading OmniGibson robot assets..."
   set -euo pipefail
   # 0) Resolve OmniGibson DATA_PATH from the uv environment
-  DATA_PATH="$(uv run python - <<'PY'
+  DATA_PATH="$(python - <<'PY'
 from omnigibson.macros import gm
 print(gm.DATA_PATH)
 PY
@@ -227,7 +226,7 @@ PY
 
   rm -rf "${ASSETS_DIR}"
 
-  uv run python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()" || {
+  python -c "from omnigibson.utils.asset_utils import download_omnigibson_robot_assets; download_omnigibson_robot_assets()" || {
     echo "ERROR: OmniGibson robot assets installation failed"
     exit 1
   }
@@ -238,18 +237,31 @@ PY
     mkdir -p "${ASSETS_DIR}/$(dirname "${CUSTOM_REL}")"
     cp -a "${STASH_DIR}/${CUSTOM_REL}" "${CUSTOM_SRC}"
     echo "✓ Restored: ${CUSTOM_SRC}"
-  else
-    echo "NOTE: No stashed custom file to restore."
+  fi
+
+  # 5) Copy r1pro_ik.urdf from the repo if it doesn't exist after restore
+  #    This URDF has mobile-base and gripper joints fixed for IK-only use.
+  if [ ! -f "${CUSTOM_SRC}" ]; then
+    REPO_IK_URDF="${WORKDIR}/assets/r1pro_ik.urdf"
+    if [ -f "${REPO_IK_URDF}" ]; then
+      echo "Copying r1pro_ik.urdf from repo..."
+      mkdir -p "${ASSETS_DIR}/$(dirname "${CUSTOM_REL}")"
+      cp -a "${REPO_IK_URDF}" "${CUSTOM_SRC}"
+      echo "✓ Installed: ${CUSTOM_SRC}"
+    else
+      echo "WARNING: r1pro_ik.urdf not found at ${REPO_IK_URDF}"
+      echo "         BEHAVIOR R1Pro environments will not work without this file."
+    fi
   fi
 
   echo "Downloading BEHAVIOR-1K assets..."
-  uv run python -c "from omnigibson.utils.asset_utils import download_behavior_1k_assets; download_behavior_1k_assets(accept_license=${DATASET_ACCEPT_FLAG})" || {
+  python -c "from omnigibson.utils.asset_utils import download_behavior_1k_assets; download_behavior_1k_assets(accept_license=${DATASET_ACCEPT_FLAG})" || {
     echo "ERROR: BEHAVIOR-1K assets installation failed"
     exit 1
   }
 
   echo "Downloading 2025 BEHAVIOR Challenge Task Instances..."
-  uv run python -c "from omnigibson.utils.asset_utils import download_2025_challenge_task_instances; download_2025_challenge_task_instances()" || {
+  python -c "from omnigibson.utils.asset_utils import download_2025_challenge_task_instances; download_2025_challenge_task_instances()" || {
     echo "ERROR: 2025 BEHAVIOR Challenge Task Instances installation failed"
     exit 1
   }
