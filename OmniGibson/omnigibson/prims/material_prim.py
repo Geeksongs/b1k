@@ -271,7 +271,10 @@ class MaterialPrim(BasePrim):
         if non_default_inp is not None:
             return non_default_inp
 
-        return self._shader_node.GetInput(inp).GetDefaultValue()
+        # [Della] Isaac Sim >=6.0.1's bundled USD renamed Sdr.ShaderNode.GetInput ->
+        # GetShaderInput.
+        get_input = getattr(self._shader_node, "GetInput", getattr(self._shader_node, "GetShaderInput", None))
+        return get_input(inp).GetDefaultValue()
 
     def set_input(self, inp, val):
         """
@@ -312,7 +315,12 @@ class MaterialPrim(BasePrim):
         Returns:
             set: All the shader input names associated with this material that have default values
         """
-        return set(self._shader_node.GetInputNames())
+        # [Della] Isaac Sim >=6.0.1's bundled USD renamed Sdr.ShaderNode.GetInputNames ->
+        # GetShaderInputNames.
+        get_input_names = getattr(
+            self._shader_node, "GetInputNames", getattr(self._shader_node, "GetShaderInputNames", None)
+        )
+        return set(get_input_names())
 
     def get_shader_input_names_by_type(self, input_type, include_default=False):
         """
@@ -327,10 +335,9 @@ class MaterialPrim(BasePrim):
         }
         if not include_default:
             return shader_input_names
+        get_input = getattr(self._shader_node, "GetInput", getattr(self._shader_node, "GetShaderInput", None))
         shader_default_input_names = {
-            inp_name
-            for inp_name in self.shader_default_input_names
-            if self._shader_node.GetInput(inp_name).GetType() == input_type
+            inp_name for inp_name in self.shader_default_input_names if get_input(inp_name).GetType() == input_type
         }
         return shader_input_names | shader_default_input_names
 

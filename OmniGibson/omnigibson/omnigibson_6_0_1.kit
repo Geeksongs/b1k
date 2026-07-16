@@ -1,0 +1,57 @@
+[package]
+description = "A platform for accelerating Embodied AI research"
+title = "OmniGibson"
+version = "1.5.0"
+
+keywords = ["experience", "app", "usd", "isaacsim"] # That makes it browsable in UI with "experience" filter
+
+
+[dependencies]
+"isaacsim.exp.base" = {}
+# [Della] Minimal experience file for the Kit 107.3 (Isaac Sim 5.1.0 container)
+# target. Original omnigibson_4_5_0.kit's extra settings (explicit vulkan=true,
+# livestream block, exts.folders override, registry.nucleus network registries,
+# omni.flowusd, omni.kit.xr.profile.vr) are all dropped here -- every one of them was
+# a candidate suspect for a librtx.scenedb.plugin.so crash seen during og.launch() on
+# Kit 107.3 (see docs/behavior1k-della-notes.md). Testing the bare minimum
+# (isaacsim.exp.base only, no extra [settings.app] overrides) to isolate whether ANY
+# of the 4.5.0-era settings block is the trigger, vs. Kit's own default experience
+# config (which is known-good on this driver, per the passing bare-Kit smoke test).
+# "omni.flowusd" = {}
+# "omni.kit.xr.profile.vr" = {}
+
+# [Della] headless camera rendering fix attempt -- diffed against Isaac Lab's
+# isaaclab.python.headless.rendering.kit (github.com/isaac-sim/IsaacLab), which is a
+# small delta specifically for enabling offscreen/headless RTX camera rendering on top
+# of their plain headless.kit. Adding the extensions + settings it adds that plain
+# headless mode doesn't have.
+"omni.kit.viewport.rtx" = {}
+"omni.kit.material.library" = {}
+
+[settings.app]
+name = "OmniGibson"
+version = "3.7.2"
+window.title = "OmniGibson"
+window.iconPath = "${app}/OmniGibson_logo.png"
+
+# [Della] see comment above -- Isaac Lab's plain headless.kit explicitly sets this
+# FALSE ("no full fabric population, minimal population, no scene delegate created"),
+# while their headless.rendering.kit flips it TRUE specifically to enable the render
+# delegate needed for camera data. This is the primary suspect for our
+# "HydraEngine rtx failed creating scene renderer" / empty camera annotator data issue.
+useFabricSceneDelegate = true
+
+[settings.rtx.hydra]
+readTransformsFromFabricInRenderDelegate = true
+
+# [Della] required -- without this, Kit can't find locally-cached extensions (e.g.
+# isaacsim.util.debug_draw) and falls back to an online registry sync, which fails
+# with no internet on Della compute nodes.
+[settings.app.exts.folders]
+'++' = [
+    "${app}/../exts",
+    "${app}/../extscache",
+    "${app}/../extsPhysics",
+    "${app}/../extsUser",
+    "${app}/../extsDeprecated",
+]

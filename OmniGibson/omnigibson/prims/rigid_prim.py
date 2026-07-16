@@ -24,6 +24,15 @@ from omnigibson.utils.usd_utils import (
 # Create module logger
 log = create_module_logger(module_name=__name__)
 
+
+def _get_rigid_body_raw_data(prim_path):
+    # [Della] Isaac Sim >=6.0.1 renamed contact_sensor.get_rigid_body_raw_data ->
+    # get_raw_contacts (same signature). Try the old name first (5.1.0/4.5.0), fall
+    # back to the new one.
+    contact_sensor = og.sim.contact_sensor
+    fn = getattr(contact_sensor, "get_rigid_body_raw_data", None) or contact_sensor.get_raw_contacts
+    return fn(prim_path)
+
 # Create settings for this module
 m = create_module_macros(module_path=__file__)
 
@@ -139,7 +148,7 @@ class RigidPrim(XFormPrim):
 
         # Get contact info first
         if self.contact_reporting_enabled:
-            og.sim.contact_sensor.get_rigid_body_raw_data(self.prim_path)
+            _get_rigid_body_raw_data(self.prim_path)
 
         # Grab handle to this rigid body and get name
         self.update_handles()
@@ -248,7 +257,7 @@ class RigidPrim(XFormPrim):
         # Make sure we have the ability to grab contacts for this object
         contacts = []
         if self.contact_reporting_enabled:
-            raw_data = og.sim.contact_sensor.get_rigid_body_raw_data(self.prim_path)
+            raw_data = _get_rigid_body_raw_data(self.prim_path)
             for c in raw_data:
                 # convert handles to prim paths for comparison
                 c = [*c]  # CsRawData enforces body0 and body1 types to be ints, but we want strings

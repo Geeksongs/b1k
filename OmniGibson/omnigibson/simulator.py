@@ -71,6 +71,15 @@ m.INITIAL_SCENE_PRIM_Z_OFFSET = -100.0
 
 m.KIT_FILES = {
     (4, 5, 0): "omnigibson_4_5_0.kit",
+    # [Della] Isaac Sim 4.5.0/Kit 106.5's bundled PhysX cannot create a CUDA context
+    # on Della's driver 610.43.02 (see docs/behavior1k-della-notes.md); running instead
+    # against the official nvcr.io/nvidia/isaac-sim:5.1.0 container (Kit ~107.3),
+    # which does work on this driver. Reusing the 4.5.0 experience file verbatim as a
+    # first attempt -- it's a small, mostly-declarative dependency list
+    # (isaacsim.exp.base/omni.flowusd/omni.kit.xr.profile.vr), and isaacsim.exp.base is
+    # confirmed present in the 5.1.0 container.
+    (5, 1, 0): "omnigibson_5_1_0.kit",
+    (6, 0, 1): "omnigibson_6_0_1.kit",
 }
 
 
@@ -195,6 +204,26 @@ def _launch_app():
         assert isaac_version_tuple in m.KIT_FILES, f"Isaac Sim version must be one of {list(m.KIT_FILES.keys())}"
         kit_file_name = m.KIT_FILES[isaac_version_tuple]
 
+    # [Della] Isaac Sim 5.1.0-rc.19 (the nvcr.io/nvidia/isaac-sim:5.1.0 container we run on
+    # Della) has a reproducible native crash (SIGSEGV in librtx.scenedb.plugin.so during
+    # RTX scene-renderer plugin startup) triggered specifically by passing `--portable-root
+    # <dir>` on the Kit command line (see the `--portable-root` sys.argv append below).
+    # Fully isolated via exhaustive pairwise testing (documented in
+    # docs/behavior1k-della-notes.md): NOT caused by --writable, --bind mounts, container
+    # rebuild, the custom experience= kwarg/`.kit` file, multi_gpu=False, or the
+    # omni_global_cache/omni_global_data token overrides (all individually confirmed
+    # harmless) -- isolated down to this exact flag by binary-searching every argument
+    # _launch_app() adds to sys.argv/SimulationApp. Workaround: for this specific Isaac Sim
+    # version, skip only the --portable-root override (below). We still copy the .kit file
+    # to the Isaac Sim apps dir as normal (requires /isaac-sim/apps to be bind-mounted
+    # writable on Della, since the base container image ships it read-only) -- skipping
+    # that copy was an earlier, overly-broad workaround that broke the `${app}` token
+    # resolution inside the .kit file's `exts.folders` setting (it made `${app}` resolve
+    # to the OmniGibson source dir instead of /isaac-sim/apps, so Kit couldn't find the
+    # local extension cache and fell back to an online registry sync, which fails with no
+    # internet on Della compute nodes) -- restoring the copy fixes that side effect.
+    DELLA_SKIP_PORTABLE_ROOT_VERSIONS = {(5, 1, 0)}
+
     # Copy the OmniGibson kit file and icon file to the Isaac Sim apps directory. This is necessary because the Isaac Sim app
     # expects the extensions to be reachable in the parent directory of the kit file. We copy on every launch to
     # ensure that the kit file is always up to date.
@@ -219,7 +248,11 @@ def _launch_app():
     # Prepare the directories where Omniverse will store its appdata (logs, caches, etc.)
     local_appdata = Path(gm.APPDATA_PATH) / "local"
     local_appdata.mkdir(parents=True, exist_ok=True)
-    sys.argv.extend(["--portable-root", str(local_appdata)])
+    if isaac_version_tuple not in DELLA_SKIP_PORTABLE_ROOT_VERSIONS:
+        sys.argv.extend(["--portable-root", str(local_appdata)])
+    # else: [Della] --portable-root crashes Kit 107.3's RTX renderer on this Isaac Sim
+    # version (see comment above) -- Kit falls back to its own baked-in default appdata
+    # location instead, which is known-good on this driver/Kit combination.
 
     global_cache_dir = Path(gm.APPDATA_PATH) / "global" / "cache"
     global_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -336,6 +369,19 @@ def _launch_app():
         _backend_utils._ComputeNumpyBackend if gm.USE_NUMPY_CONTROLLER_BACKEND else _backend_utils._ComputeTorchBackend
     )
 
+    # [Della] Isaac Sim >=6.0.1 removed isaacsim.core.utils.semantics.add_update_semantics
+    # in favor of add_labels(prim, labels, instance_name, overwrite) -- monkeypatch the
+    # old name back in (once, here) instead of touching every one of OmniGibson's ~7
+    # call sites. No-op on 5.1.0/4.5.0 where add_update_semantics already exists.
+    import isaacsim.core.utils.semantics as _semantics_mod
+
+    if not hasattr(_semantics_mod, "add_update_semantics"):
+
+        def _add_update_semantics_compat(prim, semantic_label, type_label="class", suffix=""):
+            return _semantics_mod.add_labels(prim, labels=[semantic_label], instance_name=type_label)
+
+        _semantics_mod.add_update_semantics = _add_update_semantics_compat
+
     return app
 
 
@@ -420,17 +466,32 @@ def _launch_simulator(*args, **kwargs):
             self._physx_simulation_interface = lazy.omni.physx.get_physx_simulation_interface()
             self._physx_scene_query_interface = lazy.omni.physx.get_physx_scene_query_interface()
             self._physx_fabric_interface = None
-            self._contact_callback = self._physics_context._physx_sim_interface.subscribe_contact_report_events(
-                self._on_contact
+            # [Della] Isaac Sim >=6.0.1 renamed PhysicsContext._physx_sim_interface ->
+            # _physics_sim_interface; fall back to the old name for 5.1.0/4.5.0.
+            _physx_sim_iface = getattr(
+                self._physics_context,
+                "_physx_sim_interface",
+                getattr(self._physics_context, "_physics_sim_interface", None),
             )
+            # [Della] Isaac Sim >=6.0.1 also renamed
+            # subscribe_contact_report_events -> subscribe_physics_contact_report_events.
+            _subscribe_contact_fn = getattr(
+                _physx_sim_iface,
+                "subscribe_contact_report_events",
+                getattr(_physx_sim_iface, "subscribe_physics_contact_report_events", None),
+            )
+            self._contact_callback = _subscribe_contact_fn(self._on_contact)
+            # [Della] Isaac Sim >=6.0.1 removed PhysicsContext._physx_interface; use
+            # self._physx_interface (same lazy.omni.physx.get_physx_interface() singleton,
+            # already used elsewhere in this class) instead -- works on both old and new.
             # The callback will be called right *before* the physics step
-            self._pre_physics_step_callback = self._physics_context._physx_interface.subscribe_physics_on_step_events(
+            self._pre_physics_step_callback = self._physx_interface.subscribe_physics_on_step_events(
                 lambda _: self._on_pre_physics_step(),
                 pre_step=True,
                 order=0,
             )
             # The callback will be called right *after* the physics step
-            self._post_physics_step_callback = self._physics_context._physx_interface.subscribe_physics_on_step_events(
+            self._post_physics_step_callback = self._physx_interface.subscribe_physics_on_step_events(
                 lambda _: self._on_post_physics_step(),
                 pre_step=False,
                 order=0,
@@ -510,7 +571,19 @@ def _launch_simulator(*args, **kwargs):
                 self.viewer_height = viewer_height
 
             # Acquire contact sensor interface
-            self._contact_sensor = lazy.isaacsim.sensors.physics._sensor.acquire_contact_sensor_interface()
+            # [Della] Isaac Sim >=6.0.1 moved this to
+            # isaacsim.sensors.experimental.physics._physics_sensors (from
+            # isaacsim.sensors.physics._sensor on 5.1.0/4.5.0).
+            try:
+                self._contact_sensor = lazy.isaacsim.sensors.physics._sensor.acquire_contact_sensor_interface()
+            except AttributeError:
+                self._contact_sensor = (
+                    lazy.isaacsim.sensors.experimental.physics._physics_sensors.acquire_contact_sensor_interface()
+                )
+                # Note: get_rigid_body_raw_data -> get_raw_contacts rename (Isaac Sim
+                # >=6.0.1) is handled at the call sites in prims/rigid_prim.py
+                # (_get_rigid_body_raw_data helper) -- can't monkeypatch this pybind11
+                # object directly, it doesn't support arbitrary attribute assignment.
 
         def _set_viewer_camera(self, relative_prim_path="/viewer_camera", viewport_name="Viewport"):
             """
@@ -859,7 +932,12 @@ def _launch_simulator(*args, **kwargs):
                 # The order of operations should strictly be:
                 #   1. Flush USD changes to PhysX
                 #   2. Update handles to reinitialize physics view
-                SimulationManager._physx_sim_interface.flush_changes()
+                # [Della] Isaac Sim >=6.0.1: SimulationManager._physics_sim_interface is
+                # the newer generic omni.physics.core interface, which doesn't have
+                # flush_changes (that's physx-specific) -- use
+                # self._physx_simulation_interface (omni.physx-specific) instead, same as
+                # the attach_stage fix above. Works unchanged on 5.1.0/4.5.0 too.
+                self._physx_simulation_interface.flush_changes()
                 self.update_handles()
 
         def _post_import_object(self, obj):
@@ -1010,12 +1088,35 @@ def _launch_simulator(*args, **kwargs):
             SimulationManager = lazy.isaacsim.core.simulation_manager.SimulationManager
             IsaacEvents = lazy.isaacsim.core.simulation_manager.IsaacEvents
 
+            # [Della] Isaac Sim >=6.0.1: create_simulation_view(backend='physx') can fail
+            # ("Failed to get a valid attached USD stage id from PhysX simulation") if the
+            # stage isn't (re-)attached to PhysX before creating the view -- explicitly
+            # attach it here. attach_stage/get_attached_stage live specifically on the
+            # omni.physx (not the newer generic omni.physics.core) simulation interface --
+            # use self._physx_simulation_interface (set via
+            # lazy.omni.physx.get_physx_simulation_interface() above), not
+            # self._physics_context's sim interface (that's the omni.physics.core one).
+            # Harmless / no-op on 5.1.0 (attach_stage is idempotent).
+            stage_id = lazy.omni.usd.get_context().get_stage_id()
+            if self._physx_simulation_interface.get_attached_stage() != stage_id:
+                self._physx_simulation_interface.attach_stage(stage_id)
+
             SimulationManager._physics_sim_view = lazy.omni.physics.tensors.create_simulation_view(
                 SimulationManager._backend
             )
             SimulationManager._physics_sim_view.set_subspace_roots("/")
-            SimulationManager._message_bus.dispatch(IsaacEvents.SIMULATION_VIEW_CREATED.value, payload={})
-            SimulationManager._message_bus.dispatch(IsaacEvents.PHYSICS_READY.value, payload={})
+            # [Della] carb.eventdispatcher renamed `dispatch` -> `dispatch_event` on Kit
+            # 107.3 (Isaac Sim 5.1.0); `dispatch` no longer exists there
+            # (AttributeError). Try the new name first, fall back to the old one so this
+            # keeps working on Kit 106.5 (Isaac Sim 4.5.0) unchanged. (Note: can't use
+            # getattr(obj, "dispatch_event", obj.dispatch) here -- the fallback default is
+            # evaluated eagerly and would itself raise AttributeError on Kit 107.3.)
+            if hasattr(SimulationManager._message_bus, "dispatch_event"):
+                _dispatch = SimulationManager._message_bus.dispatch_event
+            else:
+                _dispatch = SimulationManager._message_bus.dispatch
+            _dispatch(IsaacEvents.SIMULATION_VIEW_CREATED.value, payload={})
+            _dispatch(IsaacEvents.PHYSICS_READY.value, payload={})
 
         def update_handles(self):
             # Handles are only relevant when physx is running
@@ -1258,7 +1359,11 @@ def _launch_simulator(*args, **kwargs):
             # Record that we are done with the step context.
             self.currently_stepping = False
 
-        def _on_contact(self, contact_headers, contact_data):
+        def _on_contact(self, contact_headers, contact_data, *_extra_args):
+            # [Della] Isaac Sim >=6.0.1's subscribe_physics_contact_report_events passes
+            # an extra positional arg (e.g. a count/step) that 5.1.0/4.5.0's
+            # subscribe_contact_report_events callback signature didn't have; absorb and
+            # ignore it via *_extra_args.
             """
             This callback will be invoked after every PHYSICS step if there is any contact.
             For each of the pair of objects in each contact, we invoke the on_contact function for each of its states
