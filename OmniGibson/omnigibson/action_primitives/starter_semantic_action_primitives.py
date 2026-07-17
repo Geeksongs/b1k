@@ -206,6 +206,8 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
                 robot=self.robot,
                 batch_size=curobo_batch_size,
                 collision_activation_distance=m.DEFAULT_COLLISION_ACTIVATION_DISTANCE,
+                use_cuda_graph=False,
+                motion_cfg_kwargs={"self_collision_check": False},
             )
         )
 

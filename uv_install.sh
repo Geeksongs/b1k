@@ -76,13 +76,26 @@ if [ ! -f pyproject.toml ]; then
   uv init
 fi
 
+# =========================
+# [capx patch] Pin numpy + headless OpenCV
+# =========================
+# Enforce numpy==1.26.4 across every subsequent resolution via a global
+# constraint (honored regardless of --no-config), and pre-install the
+# headless OpenCV build so the GUI opencv-python (an OmniGibson dep) does
+# not pull in libGL on this headless server.
+CONSTRAINTS_FILE="${WORKDIR}/.capx_constraints.txt"
+printf 'numpy==1.26.4\n' > "${CONSTRAINTS_FILE}"
+export UV_CONSTRAINT="${CONSTRAINTS_FILE}"
+echo "Pre-installing numpy==1.26.4 + opencv-python-headless..."
+uv pip install --no-config "numpy==1.26.4" "opencv-python-headless<4.13"
+
 
 # =========================
 # Install OmniGibson (editable)
 # =========================
 echo "Installing OmniGibson (editable)..."
-uv pip install -e "$WORKDIR/bddl3"
-uv pip install -e "$WORKDIR/OmniGibson"
+uv pip install --no-config -e "$WORKDIR/bddl3"
+uv pip install --no-config -e "$WORKDIR/OmniGibson"
 
 # =========================
 # Isaac Sim installation
@@ -145,7 +158,7 @@ for pkg in "${ISAAC_PKGS[@]}"; do
 done
 
 echo "Installing Isaac Sim wheels..."
-uv pip install "${WHEELS[@]}"
+uv pip install --no-config "${WHEELS[@]}"
 
 rm -rf "$TMPDIR"
 
@@ -273,12 +286,12 @@ fi
 # install curobo
 # =========================
 export GIT_LFS_SKIP_SMUDGE=1
-uv pip install nvidia_curobo@git+https://github.com/StanfordVL/curobo@cbaf7d32436160956dad190a9465360fad6aba73
+uv pip install --no-config nvidia_curobo@git+https://github.com/StanfordVL/curobo@cbaf7d32436160956dad190a9465360fad6aba73
 
 # =========================
 # reinstall pyroki
 # =========================
-uv pip install pyroki@git+https://github.com/chungmin99/pyroki.git
+uv pip install --no-config pyroki@git+https://github.com/chungmin99/pyroki.git
 
 # =========================
 # Fix PyTorch CUDA compatibility
@@ -297,7 +310,7 @@ PY
 DRIVER_MAJOR=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1 || echo "0")
 if [[ "${TORCH_CUDA}" == "13.0" && "${DRIVER_MAJOR:-0}" -lt 570 ]]; then
   echo "Downgrading PyTorch to cu124 (driver ${DRIVER_MAJOR} < 570, torch.version.cuda=${TORCH_CUDA})..."
-  uv pip install "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" \
+  uv pip install --no-config "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" \
     --extra-index-url https://download.pytorch.org/whl/cu124
 fi
 
@@ -310,12 +323,27 @@ CAPX_ROOT="$(cd "${WORKDIR}/../.." && pwd)"
 
 if [ -d "${CAPX_ROOT}/capx/third_party/sam3" ]; then
   echo "Installing SAM3 perception server..."
-  uv pip install "${CAPX_ROOT}/capx/third_party/sam3" --no-deps
-  uv pip install iopath einops timm "ftfy==6.1.1" decord pycocotools
+  uv pip install --no-config "${CAPX_ROOT}/capx/third_party/sam3" --no-deps
+  uv pip install --no-config iopath einops timm "ftfy==6.1.1" decord pycocotools
 fi
 
 # pyrender is required by ContactGraspNet scene renderer
-uv pip install pyrender
+uv pip install --no-config pyrender
 
 # open3d is required by capx integrations (FrankaControlApi)
-uv pip install open3d
+uv pip install --no-config open3d
+
+# =========================
+# [capx patch] Enforce headless OpenCV + numpy pin (final)
+# =========================
+# OmniGibson / perception deps may have pulled the GUI opencv-python build,
+# which drags in libGL and breaks headless rendering. Make headless win, and
+# re-assert the numpy pin in case a later resolution bumped it.
+echo "Enforcing headless OpenCV + numpy==1.26.4 (final pass)..."
+uv pip uninstall --no-config opencv-python opencv-contrib-python 2>/dev/null || true
+uv pip install --no-config --force-reinstall --no-deps "opencv-python-headless<4.13"
+uv pip install --no-config "numpy==1.26.4"
+python - <<'PY'
+import numpy, cv2
+print(f"✓ numpy {numpy.__version__}, cv2 {cv2.__version__} (headless OK)")
+PY

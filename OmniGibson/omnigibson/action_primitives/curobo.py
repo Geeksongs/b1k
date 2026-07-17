@@ -233,7 +233,12 @@ class CuRoboMotionGenerator:
             )
             self.mg[emb_sel] = lazy.curobo.wrap.reacher.motion_gen.MotionGen(motion_gen_config)
 
+        import os as _os
+
+        _skip_warmup = _os.environ.get("OG_CUROBO_SKIP_WARMUP", "0") == "1"
         for mg in self.mg.values():
+            if _skip_warmup:
+                continue
             mg.warmup(enable_graph=False, warmup_js_trajopt=False, batch=batch_size, warmup_joint_delta=0.0)
 
             # Make sure all cuda graphs have been warmed up

@@ -341,7 +341,8 @@ def get_omnigibson_robot_asset_git_hash():
             stderr=subprocess.DEVNULL,
         )
         return git_hash.decode("utf-8").strip()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        # [Della] see get_omnigibson_git_hash() below -- same fix, same reason.
         return None
 
 
@@ -366,7 +367,11 @@ def get_omnigibson_git_hash():
             ["git", "-C", Path(og.__file__).parent, "rev-parse", "HEAD"], shell=False, stderr=subprocess.DEVNULL
         )
         return git_hash.decode("utf-8").strip()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        # [Della] the minimal Isaac Sim container has no `git` binary at all -- that
+        # raises FileNotFoundError (not CalledProcessError, which only covers git
+        # itself running and failing, e.g. "not a git repo"). Not fatal either way,
+        # this is just informational metadata recorded on the saved scene.
         return None
 
 
@@ -384,7 +389,8 @@ def get_bddl_git_hash():
             ["git", "-C", Path(bddl.__file__).parent, "rev-parse", "HEAD"], shell=False, stderr=subprocess.DEVNULL
         )
         return git_hash.decode("utf-8").strip()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        # [Della] see get_omnigibson_git_hash() above -- same fix, same reason.
         return None
 
 

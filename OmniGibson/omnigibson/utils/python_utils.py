@@ -712,6 +712,28 @@ class Wrapper:
             super().__setattr__(key, value)
 
 
+def _has_working_cxx_compiler():
+    """
+    [Della] torch.compile's inductor backend needs a working C++ compiler (g++) to
+    JIT-compile generated kernels on first call. The minimal Isaac Sim container we run
+    on Della (nvcr.io/nvidia/isaac-sim:5.1.0) doesn't ship one, which surfaces as a
+    torch._inductor.exc.InductorError: InvalidCxxCompiler the first time any
+    @torch_compile-decorated function (e.g. pose2mat) actually gets called -- not at
+    decoration time, since torch.compile() itself always succeeds (it just wraps the
+    function), so this needs to be checked eagerly here rather than relying on a
+    try/except around th.compile(). Cached so we only probe once per process.
+    """
+    import shutil
+
+    global _CXX_COMPILER_CHECK_CACHE
+    try:
+        return _CXX_COMPILER_CHECK_CACHE
+    except NameError:
+        pass
+    _CXX_COMPILER_CHECK_CACHE = shutil.which("g++") is not None or shutil.which("cc") is not None
+    return _CXX_COMPILER_CHECK_CACHE
+
+
 def torch_compile(func):
     """
     Decorator to compile a function with torch.compile on Linux and torch.jit.script on Windows. This is because of poor support for torch.compile on Windows.
@@ -725,6 +747,11 @@ def torch_compile(func):
     # If we're on Windows, return a jitscript option
     if sys.platform == "win32":
         return th.jit.script(func)
+    # [Della] No C++ compiler available in the container -- torch.compile's inductor
+    # backend would raise InvalidCxxCompiler on first call. Fall back to the plain
+    # (eager, uncompiled) function -- correctness is unaffected, only performance.
+    elif not _has_working_cxx_compiler():
+        return func
     # Otherwise, return a torch.compile option
     else:
         return th.compile(func)
