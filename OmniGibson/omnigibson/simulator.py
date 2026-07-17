@@ -648,7 +648,17 @@ def _launch_simulator(*args, **kwargs):
         def _set_renderer_settings(self):
             lazy.carb.settings.get_settings().set_bool("/rtx/reflections/enabled", True)
             lazy.carb.settings.get_settings().set_bool("/rtx/indirectDiffuse/enabled", True)
-            lazy.carb.settings.get_settings().set_int("/rtx/post/dlss/execMode", 0)  # "Performance"
+            # [debug 2026-07-17] M4 trial videos on Della show persistent heavy grain/noise
+            # in every frame (not just right after camera movement -- present throughout),
+            # which plausibly hurts SAM3 detection accuracy/reliability (see
+            # docs/behavior1k-della-notes.md, M4 success-rate investigation). DLSS
+            # "Performance" (execMode=0) renders at a much lower internal resolution before
+            # upscaling; testing "Quality" (execMode=2) to see whether that's the noise
+            # source before investigating RT denoiser/accumulation settings instead.
+            import os as _os
+
+            _dlss_mode = int(_os.environ.get("OG_DLSS_EXEC_MODE", "2"))
+            lazy.carb.settings.get_settings().set_int("/rtx/post/dlss/execMode", _dlss_mode)
             lazy.carb.settings.get_settings().set_bool("/rtx/ambientOcclusion/enabled", True)
             lazy.carb.settings.get_settings().set_bool("/rtx/directLighting/sampledLighting/enabled", True)
             lazy.carb.settings.get_settings().set_int("/rtx/raytracing/showLights", 1)
