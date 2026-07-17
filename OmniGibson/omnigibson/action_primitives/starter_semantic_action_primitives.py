@@ -2149,8 +2149,31 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
             empty_action = self.robot.q_to_action(holonomic_base_command_in_world_frame(self.robot, self.robot.get_joint_positions()))
             yield self._postprocess_action(empty_action)
 
-        for _ in range(m.MAX_STEPS_FOR_SETTLING):
-            if th.norm(self.robot.get_linear_velocity()) < 0.01:
+        # [debug] instrumented to find a suspected silent hang (docs/behavior1k-della-notes.md
+        # §11c): this loop has a hard cap (m.MAX_STEPS_FOR_SETTLING) but no per-iteration
+        # logging, so if the linear-velocity convergence check never fires on 6.0.1 (e.g. a
+        # units/frame change from an API rename), it silently burns the full step budget every
+        # call with zero console output -- indistinguishable from a true hang without this.
+        import time as _time
+
+        _settle_t0 = _time.time()
+        _i = 0
+        for _i in range(m.MAX_STEPS_FOR_SETTLING):
+            _vel = th.norm(self.robot.get_linear_velocity())
+            if _vel < 0.01:
                 break
             empty_action = self.robot.q_to_action(holonomic_base_command_in_world_frame(self.robot, self.robot.get_joint_positions()))
             yield self._postprocess_action(empty_action)
+        if _i >= m.MAX_STEPS_FOR_SETTLING - 1:
+            print(
+                f"[_settle_robot] WARNING: hit MAX_STEPS_FOR_SETTLING ({m.MAX_STEPS_FOR_SETTLING}) "
+                f"without converging (last linear velocity norm={float(_vel):.4f}, "
+                f"took {_time.time() - _settle_t0:.2f}s)",
+                flush=True,
+            )
+        elif _i > 20:
+            print(
+                f"[_settle_robot] settled after {_i} steps ({_time.time() - _settle_t0:.2f}s), "
+                f"final velocity norm={float(_vel):.4f}",
+                flush=True,
+            )
