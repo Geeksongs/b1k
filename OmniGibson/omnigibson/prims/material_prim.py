@@ -257,6 +257,23 @@ class MaterialPrim(BasePrim):
         """
         bind_material(prim_path=target_prim_path, material_path=self.prim_path)
 
+    def _shader_node_get_input(self, inp):
+        """[b1k-isaac-6.0.1] USD's Sdr.ShaderNode module (bundled with Kit, not
+        Isaac-Sim-specific) renamed GetInput -> GetShaderInput on Isaac Sim
+        >=6.0.1 (fix #9)."""
+        try:
+            return self._shader_node.GetInput(inp)
+        except AttributeError:
+            return self._shader_node.GetShaderInput(inp)
+
+    def _shader_node_get_input_names(self):
+        """[b1k-isaac-6.0.1] same rename as _shader_node_get_input, for
+        GetInputNames -> GetShaderInputNames (fix #9)."""
+        try:
+            return self._shader_node.GetInputNames()
+        except AttributeError:
+            return self._shader_node.GetShaderInputNames()
+
     def get_input(self, inp):
         """
         Grabs the input with corresponding name @inp associated with this material and shader
@@ -271,7 +288,7 @@ class MaterialPrim(BasePrim):
         if non_default_inp is not None:
             return non_default_inp
 
-        return self._shader_node.GetInput(inp).GetDefaultValue()
+        return self._shader_node_get_input(inp).GetDefaultValue()
 
     def set_input(self, inp, val):
         """
@@ -312,7 +329,7 @@ class MaterialPrim(BasePrim):
         Returns:
             set: All the shader input names associated with this material that have default values
         """
-        return set(self._shader_node.GetInputNames())
+        return set(self._shader_node_get_input_names())
 
     def get_shader_input_names_by_type(self, input_type, include_default=False):
         """
@@ -330,7 +347,7 @@ class MaterialPrim(BasePrim):
         shader_default_input_names = {
             inp_name
             for inp_name in self.shader_default_input_names
-            if self._shader_node.GetInput(inp_name).GetType() == input_type
+            if self._shader_node_get_input(inp_name).GetType() == input_type
         }
         return shader_input_names | shader_default_input_names
 

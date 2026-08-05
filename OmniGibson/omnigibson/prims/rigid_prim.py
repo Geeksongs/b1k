@@ -32,6 +32,18 @@ m.DEFAULT_REST_OFFSET = 0.0
 m.LEGACY_META_LINK_PATTERN = re.compile(r".*:(\w+)_([A-Za-z0-9]+)_(\d+)_link")
 
 
+def _get_rigid_body_raw_data(contact_sensor, prim_path):
+    """[b1k-isaac-6.0.1] Isaac Sim >=6.0.1 renamed the contact sensor interface's
+    get_rigid_body_raw_data -> get_raw_contacts (same signature). The interface
+    object is pybind11-bound and does not support arbitrary attribute assignment,
+    so this can't be monkeypatched back onto it directly -- call sites use this
+    module-level helper instead (fix #6)."""
+    try:
+        return contact_sensor.get_rigid_body_raw_data(prim_path)
+    except AttributeError:
+        return contact_sensor.get_raw_contacts(prim_path)
+
+
 class RigidPrim(XFormPrim):
     """
     Base class that provides common functionality for all rigid prim types.
@@ -139,7 +151,7 @@ class RigidPrim(XFormPrim):
 
         # Get contact info first
         if self.contact_reporting_enabled:
-            og.sim.contact_sensor.get_rigid_body_raw_data(self.prim_path)
+            _get_rigid_body_raw_data(og.sim.contact_sensor, self.prim_path)
 
         # Grab handle to this rigid body and get name
         self.update_handles()
@@ -248,7 +260,7 @@ class RigidPrim(XFormPrim):
         # Make sure we have the ability to grab contacts for this object
         contacts = []
         if self.contact_reporting_enabled:
-            raw_data = og.sim.contact_sensor.get_rigid_body_raw_data(self.prim_path)
+            raw_data = _get_rigid_body_raw_data(og.sim.contact_sensor, self.prim_path)
             for c in raw_data:
                 # convert handles to prim paths for comparison
                 c = [*c]  # CsRawData enforces body0 and body1 types to be ints, but we want strings

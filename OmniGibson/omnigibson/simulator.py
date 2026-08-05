@@ -71,6 +71,10 @@ m.INITIAL_SCENE_PRIM_Z_OFFSET = -100.0
 
 m.KIT_FILES = {
     (4, 5, 0): "omnigibson_4_5_0.kit",
+    # [b1k-isaac-6.0.1] copy of omnigibson_4_5_0.kit -- same minimal
+    # isaacsim.exp.base + omni.kit.viewport.rtx + omni.kit.material.library
+    # dependency set, all confirmed present in the 6.0.1 container (fix #11).
+    (6, 0, 1): "omnigibson_6_0_1.kit",
 }
 
 
@@ -231,6 +235,22 @@ def _launch_app():
 
     with launch_context(None):
         app = lazy.isaacsim.SimulationApp(config_kwargs, experience=str(kit_file_target.resolve(strict=True)))
+
+    # [b1k-isaac-6.0.1] isaacsim.core.utils.semantics.add_update_semantics was removed
+    # on Isaac Sim >=6.0.1, replaced by add_labels(prim, labels, instance_name,
+    # overwrite). Monkeypatch the old name back onto the real module (a plain Python
+    # module, unlike the pybind11 contact-sensor interface in fix #6 -- this DOES
+    # support attribute assignment) so all ~7 existing add_update_semantics call
+    # sites across this codebase keep working unchanged (fix #7).
+    try:
+        lazy.isaacsim.core.utils.semantics.add_update_semantics
+    except AttributeError:
+        def _add_update_semantics(prim, semantic_label, type_label="class"):
+            return lazy.isaacsim.core.utils.semantics.add_labels(
+                prim, labels=[semantic_label], instance_name=type_label, overwrite=True
+            )
+
+        lazy.isaacsim.core.utils.semantics.add_update_semantics = _add_update_semantics
 
     # Close the stage so that we can create a new one when a Simulator Instance is created
     assert lazy.isaacsim.core.utils.stage.close_stage()
@@ -420,17 +440,33 @@ def _launch_simulator(*args, **kwargs):
             self._physx_simulation_interface = lazy.omni.physx.get_physx_simulation_interface()
             self._physx_scene_query_interface = lazy.omni.physx.get_physx_scene_query_interface()
             self._physx_fabric_interface = None
-            self._contact_callback = self._physics_context._physx_sim_interface.subscribe_contact_report_events(
-                self._on_contact
-            )
+            # [b1k-isaac-6.0.1] Isaac Sim >=6.0.1 renamed PhysicsContext._physx_sim_interface
+            # -> _physics_sim_interface, and subscribe_contact_report_events ->
+            # subscribe_physics_contact_report_events. Try the old (4.5.0/5.1.0) name/
+            # behavior first via getattr fallback so nothing regresses there (see
+            # docs/behavior1k-della-notes.md fix #1/#2).
+            try:
+                _contact_iface = self._physics_context._physx_sim_interface
+                _contact_subscribe = _contact_iface.subscribe_contact_report_events
+            except AttributeError:
+                _contact_iface = self._physics_context._physics_sim_interface
+                _contact_subscribe = _contact_iface.subscribe_physics_contact_report_events
+            self._contact_callback = _contact_subscribe(self._on_contact)
+            # [b1k-isaac-6.0.1] Isaac Sim >=6.0.1 removed PhysicsContext._physx_interface
+            # entirely; fall back to this Simulator's own self._physx_interface (set
+            # above, same lazy.omni.physx.get_physx_interface() object) instead (fix #3).
+            try:
+                _step_events_iface = self._physics_context._physx_interface
+            except AttributeError:
+                _step_events_iface = self._physx_interface
             # The callback will be called right *before* the physics step
-            self._pre_physics_step_callback = self._physics_context._physx_interface.subscribe_physics_on_step_events(
+            self._pre_physics_step_callback = _step_events_iface.subscribe_physics_on_step_events(
                 lambda _: self._on_pre_physics_step(),
                 pre_step=True,
                 order=0,
             )
             # The callback will be called right *after* the physics step
-            self._post_physics_step_callback = self._physics_context._physx_interface.subscribe_physics_on_step_events(
+            self._post_physics_step_callback = _step_events_iface.subscribe_physics_on_step_events(
                 lambda _: self._on_post_physics_step(),
                 pre_step=False,
                 order=0,
@@ -510,7 +546,15 @@ def _launch_simulator(*args, **kwargs):
                 self.viewer_height = viewer_height
 
             # Acquire contact sensor interface
-            self._contact_sensor = lazy.isaacsim.sensors.physics._sensor.acquire_contact_sensor_interface()
+            # [b1k-isaac-6.0.1] isaacsim.sensors.physics._sensor was removed and moved to
+            # isaacsim.sensors.experimental.physics._physics_sensors (same
+            # acquire_contact_sensor_interface() API) on Isaac Sim >=6.0.1 (fix #5).
+            try:
+                self._contact_sensor = lazy.isaacsim.sensors.physics._sensor.acquire_contact_sensor_interface()
+            except AttributeError:
+                self._contact_sensor = (
+                    lazy.isaacsim.sensors.experimental.physics._physics_sensors.acquire_contact_sensor_interface()
+                )
 
         def _set_viewer_camera(self, relative_prim_path="/viewer_camera", viewport_name="Viewport"):
             """
@@ -573,15 +617,77 @@ def _launch_simulator(*args, **kwargs):
             self._physics_context.set_gpu_max_rigid_patch_count(gm.GPU_MAX_RIGID_PATCH_COUNT)
 
         def _set_renderer_settings(self):
-            lazy.carb.settings.get_settings().set_bool("/rtx/reflections/enabled", True)
-            lazy.carb.settings.get_settings().set_bool("/rtx/indirectDiffuse/enabled", True)
-            lazy.carb.settings.get_settings().set_int("/rtx/post/dlss/execMode", 0)  # "Performance"
-            lazy.carb.settings.get_settings().set_bool("/rtx/ambientOcclusion/enabled", True)
+            # [capx] H200 显存/算力都充足,感知质量优先于渲染吞吐量。原来这里为了 RL 训练
+            # 吞吐量关掉了反射/间接光/环境光遮蔽,并把 DLSS 设成 "Performance" (execMode=0)
+            # ——DLSS Performance 会把内部实际渲染分辨率降到目标分辨率的一半左右再用 AI 插值
+            # 放大(实测触发过 "Render resolution of (256, 256)" 的警告,对应我们配置的
+            # 512x512 传感器分辨率被砍半渲染),SAM3/Molmo 拿到的画面从渲染层面就已经丢失了
+            # 真实细节,不是单纯调传感器 image_width/height 数值能弥补的。现在全部改为质量
+            # 优先:反射/间接光/环境光遮蔽全部打开,AA 改用 DLAA(按目标分辨率原生渲染,只用
+            # AI 做抗锯齿,不做任何内部降采样)。
+            # [capx 2026-07-19] Permanently OFF -- these RaytracedLighting-specific effect toggles
+            # have zero effect once /rtx/rendermode is "PathTracing" (see the comment on the
+            # per-effect sample-count settings below -- PathTracing computes reflections/GI/AO
+            # itself via maxBounces etc, it doesn't read these flags at all), so disabling them
+            # doesn't change our quality-mode (noise-free) output one bit. What DOES benefit is
+            # the cheap RaytracedLighting mode _set_fast_render() switches to during blind
+            # joint/base motion loops -- these were previously left enabled there too (costing
+            # real time on effects nothing is looking at mid-motion) before this project's
+            # priority was clarified as "no noise" specifically, not "photorealistic reflections."
+            lazy.carb.settings.get_settings().set_bool("/rtx/reflections/enabled", False)
+            lazy.carb.settings.get_settings().set_bool("/rtx/indirectDiffuse/enabled", False)
+            lazy.carb.settings.get_settings().set_int("/rtx/post/aa/op", 4)  # DLAA (native res, AI anti-aliasing only)
+            lazy.carb.settings.get_settings().set_int("/rtx/post/dlss/execMode", 2)  # "Quality" (fallback if DLAA unsupported)
+            lazy.carb.settings.get_settings().set_bool("/rtx/ambientOcclusion/enabled", False)
             lazy.carb.settings.get_settings().set_bool("/rtx/directLighting/sampledLighting/enabled", True)
             lazy.carb.settings.get_settings().set_int("/rtx/raytracing/showLights", 1)
             lazy.carb.settings.get_settings().set_float("/rtx/sceneDb/ambientLightIntensity", 1.0)
             lazy.carb.settings.get_settings().set_bool("/app/renderer/skipMaterialLoading", False)
             lazy.carb.settings.get_settings().set_bool("/rtx/flow/enabled", True)
+            # [capx] Maxing out RaytracedLighting's per-effect sample counts (directLighting/
+            # reflections samplesPerPixel, indirectDiffuse fetchSampleCount, ambientOcclusion
+            # samples) only cut noise ~10% -- confirmed the remaining grain is not a tunable-
+            # sample-count problem within that renderer at all: "RaytracedLighting" (the default)
+            # is Omniverse's REAL-TIME approximation renderer, built for a live human-facing 30fps
+            # viewport, and has an inherent noise floor no per-effect setting removes. The actual
+            # fix is switching render MODE entirely to PathTracing -- a true offline-quality path
+            # tracer that accumulates samples per pixel until fully converged. We don't need 30fps
+            # (one frame captured per action step, not a live human viewport), so there's no reason
+            # to accept the real-time renderer's noise floor. (The per-effect sample-count settings
+            # above are RaytracedLighting-only and simply have no effect once rendermode is
+            # PathTracing -- left in place as a harmless fallback, not removed.)
+            lazy.carb.settings.get_settings().set_string("/rtx/rendermode", "PathTracing")
+            # NOTE: spp=128 + 3 cameras (head + 2 wrists) all at 1008x1008 simultaneously exhausted
+            # the renderer's descriptor-set pool ("Unable to allocate descriptor sets" / "Failed to
+            # allocate ParameterBlock resources", a fixed-size Vulkan resource-pool limit, NOT a
+            # VRAM-capacity limit -- H200's 140GB was nowhere near full) and hung in an infinite
+            # failed-render retry loop. Backed off to a more moderate spp; raise again later once
+            # confirmed stable, ideally after finding the actual descriptor-pool-size setting rather
+            # than just reducing render load to dodge it.
+            # [capx 2026-07-19] spp=32 with NO denoiser is fully converged (0 frame-to-frame noise)
+            # but costs ~10s/frame at 1008x1008x3 cameras -- with STEP_CAP=0.03m/tick, a single
+            # 0.5m move_base_avoiding call needs ~17 renders, i.e. minutes per call. Measured
+            # spp={4,8,16} with the OptiX AI denoiser (/rtx/pathtracing/optixDenoiser) via
+            # scripts/capx_setup/test_render_speed_denoiser.py: spp=4 is visibly grainy even
+            # denoised (unacceptable); spp=16 is visually clean but the denoiser's own overhead
+            # makes it SLOWER than spp=32/no-denoiser (no benefit); spp=8 is the sweet spot --
+            # visually clean (only very faint blotchiness on flat dark/ceiling surfaces) and 1.7x
+            # faster (5.86s vs 10.16s/frame).
+            lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/spp", 8)  # samples/pixel/frame
+            # totalSpp=0 ("keep accumulating, no cap") breaks OmniGibson's Replicator-based sensor
+            # pipeline outright ("Total SPP set to 0, Replicator unable to run" -> physics_sim_view
+            # never gets created -> AttributeError/segfault on the very first scene import). Must
+            # be a positive value; match it to spp so each single frame is itself fully converged
+            # without relying on multi-frame accumulation (the robot moves every step, so a static
+            # accumulation window across frames isn't meaningful here anyway).
+            lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/totalSpp", 8)
+            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/adaptiveSampling/enabled", True)
+            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/optixDenoiser/enabled", True)
+            # Temporal accumulation reuses previous frames' denoised history -- good for a static
+            # viewport, but this camera moves every tick, so temporal reuse would smear/ghost.
+            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/optixDenoiser/temporalMode/enabled", False)
+            lazy.carb.settings.get_settings().set_float("/rtx/pathtracing/optixDenoiser/blendFactor", 0.0)  # 0 = fully denoised
+            lazy.carb.settings.get_settings().set_bool("/rtx/directLighting/sampledLighting/irradiance/denoiser/enabled", True)
 
             # Below settings are for improving performance: we use the USD / Fabric only for poses.
             lazy.carb.settings.get_settings().set_bool("/physics/updateToUsd", not gm.ENABLE_FLATCACHE)
@@ -859,7 +965,16 @@ def _launch_simulator(*args, **kwargs):
                 # The order of operations should strictly be:
                 #   1. Flush USD changes to PhysX
                 #   2. Update handles to reinitialize physics view
-                SimulationManager._physx_sim_interface.flush_changes()
+                # [b1k-isaac-6.0.1] SimulationManager._physx_sim_interface doesn't exist
+                # as a class attribute on Isaac Sim >=6.0.1 (SimulationManager.
+                # _physics_sim_interface is the newer generic interface, but it has no
+                # flush_changes()) -- fall back to this Simulator's own
+                # self._physx_simulation_interface.flush_changes() (same interface
+                # object as fix #4) (fix #10).
+                try:
+                    SimulationManager._physx_sim_interface.flush_changes()
+                except AttributeError:
+                    self._physx_simulation_interface.flush_changes()
                 self.update_handles()
 
         def _post_import_object(self, obj):
@@ -1009,6 +1124,20 @@ def _launch_simulator(*args, **kwargs):
         def _refresh_physics_sim_view(self):
             SimulationManager = lazy.isaacsim.core.simulation_manager.SimulationManager
             IsaacEvents = lazy.isaacsim.core.simulation_manager.IsaacEvents
+
+            # [b1k-isaac-6.0.1] create_simulation_view(backend='physx') can fail with
+            # "Failed to get a valid attached USD stage id from PhysX simulation" on
+            # Isaac Sim >=6.0.1 if the stage isn't attached first. attach_stage/
+            # get_attached_stage live specifically on self._physx_simulation_interface
+            # (IPhysxSimulation) -- NOT self._physics_context's sim interface (the
+            # newer generic omni.physics.core abstraction, no attach_stage) and NOT
+            # self._physx_interface (IPhysx, a third distinct interface). No-op on
+            # older Isaac Sim where these methods don't exist (fix #4).
+            try:
+                if not self._physx_simulation_interface.get_attached_stage():
+                    self._physx_simulation_interface.attach_stage()
+            except AttributeError:
+                pass
 
             SimulationManager._physics_sim_view = lazy.omni.physics.tensors.create_simulation_view(
                 SimulationManager._backend
@@ -1258,7 +1387,11 @@ def _launch_simulator(*args, **kwargs):
             # Record that we are done with the step context.
             self.currently_stepping = False
 
-        def _on_contact(self, contact_headers, contact_data):
+        def _on_contact(self, contact_headers, contact_data, *_extra_args):
+            # [b1k-isaac-6.0.1] the contact callback signature gained an extra
+            # positional arg on Isaac Sim >=6.0.1 (pybind11 error otherwise:
+            # "_on_contact() takes 3 positional arguments but 4 were given") --
+            # *_extra_args absorbs it without changing behavior (fix #8).
             """
             This callback will be invoked after every PHYSICS step if there is any contact.
             For each of the pair of objects in each contact, we invoke the on_contact function for each of its states
