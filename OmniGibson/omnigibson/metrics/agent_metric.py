@@ -7,6 +7,7 @@ from typing import Optional
 class AgentMetric(MetricBase):
     def __init__(self, human_stats: Optional[dict] = None):
         self.initialized = False
+        self.delta_agent_distance = {}
         self.human_stats = human_stats
         if human_stats is None:
             print("No human stats provided.")

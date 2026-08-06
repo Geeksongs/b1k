@@ -2143,7 +2143,20 @@ class StarterSemanticActionPrimitives(BaseActionPrimitiveSet):
         Returns:
             th.tensor or None: Action array for one step for the robot to do nothing
         """
-        for _ in range(50):
+        # [capx 2026-07-19] Reduced the unconditional floor from 50 -> 10 physics ticks. This
+        # constant predates our PathTracing render-quality fix (spp=8+denoiser at 1008x1008 x 3
+        # cameras, ~5-6s/tick) and was presumably tuned assuming near-real-time rendering
+        # (milliseconds/tick), where 50 extra ticks costs nothing. Under our current per-tick
+        # cost it's ~280s EVERY single call, with settle_steps=10 in _move_to_joint_positions
+        # (capx/envs/simulators/r1pro_b1k.py) meaning open_gripper/close_gripper/lift_arm trigger
+        # it roughly once per 10 real ticks -- confirmed live in the 2026-07-19 popcorn_run14 run
+        # (grasp_object's open_gripper call alone burning potentially ~40min just on this floor
+        # across ~9 settle triggers). Our motion primitives already move in small incremental
+        # steps (joint_step_cap=0.05rad, base STEP_CAP=0.06m) specifically to avoid inducing large
+        # velocities, so residual motion to settle is much smaller than whatever this constant was
+        # originally sized for; 10 ticks + the existing velocity-conditioned loop below (which
+        # still applies, unchanged) is a reasonable, conservative reduction, not a removal.
+        for _ in range(10):
             empty_action = self.robot.q_to_action(holonomic_base_command_in_world_frame(self.robot, self.robot.get_joint_positions()))
             yield self._postprocess_action(empty_action)
 

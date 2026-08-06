@@ -47,7 +47,7 @@ scene:
 
 robots:
   - type: R1Pro
-    obs_modalities: [rgb, depth_linear, proprio, seg_instance]
+    obs_modalities: [rgb, depth_linear, proprio]  # [b1k 2026-08-06] seg_instance dropped -- see r1pro_primitives_single.yaml comment: forces seg_semantic on too, which returns an empty tensor/mapping in this container and crashes vision_sensor.py._remap_semantic_segmentation ("max() arg is an empty sequence")
     position: [5.0, 4.3, 0.00]
     include_sensor_names: null
     exclude_sensor_names: null
@@ -89,8 +89,13 @@ robots:
     sensor_config:
       VisionSensor:
         sensor_kwargs:
-          image_height: 512
-          image_width: 512
+          # [capx] bumped from 512 to SAM3's native training resolution (1008) so the
+          # perception pipeline isn't handing SAM3 an already-downsampled frame that it then
+          # has to upsample internally (Sam3Processor always resizes to 1008x1008 regardless
+          # of input size -- feeding it native 1008 avoids that extra upsample-from-512 step).
+          # H200 VRAM/compute headroom makes this a non-issue perf-wise.
+          image_height: 1008
+          image_width: 1008
           # horizontal_aperture: 40
           focal_length: 10.0
 

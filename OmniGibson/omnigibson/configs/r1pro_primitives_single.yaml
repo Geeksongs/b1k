@@ -47,7 +47,13 @@ scene:
 
 robots:
   - type: R1Pro
-    obs_modalities: [rgb, depth_linear, proprio, seg_instance]
+    # [b1k-isaac-4.5.0-headless-fix 2026-08-06] seg_instance dropped: it forces
+    # seg_semantic on too (vision_sensor.py semantic_dependent_modalities logic),
+    # and the seg_semantic Replicator annotator returns an empty (numel()==0)
+    # tensor in this container -- likely a Replicator-specific init issue,
+    # separate from base RGB/depth texture readback. rgb/depth_linear are what
+    # the Harness VLA pipeline actually consumes; seg_instance isn't needed.
+    obs_modalities: [rgb, depth_linear, proprio]
     position: [5.0, 4.3, 0.00]
     include_sensor_names: null
     exclude_sensor_names: null

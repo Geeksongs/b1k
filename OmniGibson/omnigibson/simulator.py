@@ -673,16 +673,49 @@ def _launch_simulator(*args, **kwargs):
             # makes it SLOWER than spp=32/no-denoiser (no benefit); spp=8 is the sweet spot --
             # visually clean (only very faint blotchiness on flat dark/ceiling surfaces) and 1.7x
             # faster (5.86s vs 10.16s/frame).
-            lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/spp", 8)  # samples/pixel/frame
-            # totalSpp=0 ("keep accumulating, no cap") breaks OmniGibson's Replicator-based sensor
-            # pipeline outright ("Total SPP set to 0, Replicator unable to run" -> physics_sim_view
-            # never gets created -> AttributeError/segfault on the very first scene import). Must
-            # be a positive value; match it to spp so each single frame is itself fully converged
-            # without relying on multi-frame accumulation (the robot moves every step, so a static
-            # accumulation window across frames isn't meaningful here anyway).
-            lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/totalSpp", 8)
-            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/adaptiveSampling/enabled", True)
-            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/optixDenoiser/enabled", True)
+            # [b1k 2026-08-06] Bumped from spp=8 back up to spp=32 -- the
+            # spp=8+denoiser "sweet spot" claim above (and the referenced
+            # test_render_speed_denoiser.py benchmark script) could not be
+            # verified: that script does not exist anywhere in this repo,
+            # and a live capture at spp=8 came back visibly too noisy to
+            # use. Re-testing at spp=32 (the value this same comment block
+            # says is "fully converged, 0 frame-to-frame noise" without a
+            # denoiser) until quality is confirmed acceptable again.
+            # [b1k 2026-08-06] spp/denoiser now env-var-overridable
+            # (B1K_RENDER_SPP / B1K_RENDER_DENOISER=0|1 / B1K_RENDER_ADAPTIVE=0|1)
+            # for A/B render-quality-vs-speed testing without editing this
+            # file per attempt -- the spp=8+denoiser "sweet spot" claimed
+            # above (and its referenced test_render_speed_denoiser.py
+            # benchmark script) could not be verified: that script does not
+            # exist anywhere in this repo, and a live capture at spp=8 came
+            # back visibly too noisy to use.
+            # [b1k 2026-08-06] LIVE-CONFIRMED: spp is the sample budget PER
+            # render() call; totalSpp is the cross-call accumulation CAP.
+            # The old capx comment matched totalSpp to spp ("each single
+            # frame is itself fully converged") -- that makes every
+            # render() call redundant with the last: since the cap is hit
+            # in one call, calling render() N times (env_base.py's
+            # n_render_iterations) just recomputes the SAME spp-sample
+            # image N times, not accumulating further. Confirmed live: at
+            # spp=totalSpp=32, images at n_render_iterations=1 and =16 were
+            # visually identical (same noise pattern), proving no
+            # cross-call accumulation was happening. Decoupling them (spp
+            # low = cheap per call, totalSpp high = real accumulation
+            # target) lets a caller trade latency for quality by choosing
+            # n_render_iterations, which was the actual point of exposing
+            # that parameter (env_server.py's step() now forwards it).
+            # totalSpp=0 ("keep accumulating, no cap") is still avoided --
+            # breaks OmniGibson's Replicator-based sensor pipeline outright
+            # ("Total SPP set to 0, Replicator unable to run" -> AttributeError/
+            # segfault on the very first scene import) -- must be positive.
+            _b1k_spp = int(os.environ.get("B1K_RENDER_SPP", "8"))
+            _b1k_total_spp = int(os.environ.get("B1K_RENDER_TOTAL_SPP", "128"))
+            _b1k_denoiser = os.environ.get("B1K_RENDER_DENOISER", "0") == "1"
+            _b1k_adaptive = os.environ.get("B1K_RENDER_ADAPTIVE", "1") == "1"
+            lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/spp", _b1k_spp)  # samples/pixel/render() call
+            lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/totalSpp", _b1k_total_spp)  # cross-call accumulation cap
+            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/adaptiveSampling/enabled", _b1k_adaptive)
+            lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/optixDenoiser/enabled", _b1k_denoiser)
             # Temporal accumulation reuses previous frames' denoised history -- good for a static
             # viewport, but this camera moves every tick, so temporal reuse would smear/ghost.
             lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/optixDenoiser/temporalMode/enabled", False)
@@ -1135,7 +1168,15 @@ def _launch_simulator(*args, **kwargs):
             # older Isaac Sim where these methods don't exist (fix #4).
             try:
                 if not self._physx_simulation_interface.get_attached_stage():
-                    self._physx_simulation_interface.attach_stage()
+                    # [b1k-isaac-4.5.0] on this Isaac Sim version attach_stage()
+                    # requires an explicit stage_id argument (TypeError otherwise) --
+                    # unlike the newer Isaac Sim >=6.0.1 API this comment block
+                    # originally targeted, where attach_stage() takes no arguments.
+                    try:
+                        self._physx_simulation_interface.attach_stage()
+                    except TypeError:
+                        stage_id = lazy.omni.usd.get_context().get_stage_id()
+                        self._physx_simulation_interface.attach_stage(stage_id)
             except AttributeError:
                 pass
 

@@ -48,7 +48,7 @@ scene:
 
 robots:
   - type: R1Pro
-    obs_modalities: [rgb, depth_linear, proprio, seg_instance]
+    obs_modalities: [rgb, depth_linear, proprio]  # [b1k 2026-08-06] seg_instance dropped -- see r1pro_primitives_single.yaml comment: forces seg_semantic on too, which returns an empty tensor/mapping in this container and crashes vision_sensor.py._remap_semantic_segmentation ("max() arg is an empty sequence")
     position: [5.0, 4.3, 0.00]
     include_sensor_names: null
     exclude_sensor_names: null

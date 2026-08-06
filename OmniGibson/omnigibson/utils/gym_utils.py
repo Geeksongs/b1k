@@ -57,8 +57,14 @@ def recursively_generate_compatible_dict(dic):
         elif isinstance(v, th.Tensor) and v.dim() > 1:
             # Map to list of tuples
             out[k] = tuple(tuple(row.tolist()) for row in v)
-        elif isinstance(v, Iterable):
+        elif isinstance(v, Iterable) and not isinstance(v, th.Tensor):
             # bounding box modalities give a list of tuples
+            # [b1k-isaac-4.5.0] scalar/1-D th.Tensor values (e.g. proprio,
+            # task::low_dim) must NOT hit this branch -- Iterable matches them
+            # too, and converting to a plain tuple makes
+            # recursively_generate_flat_dict treat it as a gym.spaces.Tuple
+            # and explode it into per-index keys (key::0, key::1, ...),
+            # which then fails to match the observation_space's single Box key.
             out[k] = tuple(v)
         else:
             # Preserve the key-value pair

@@ -324,6 +324,20 @@ class VisionSensor(BaseSensor):
                 # Obs is either a dictionary of {"data":, ..., "info": ...} or a direct array
                 obs[modality] = raw_obs["data"] if isinstance(raw_obs, dict) else raw_obs
 
+            # [b1k-isaac-4.5.0-headless-fix 2026-08-06] This container's GPU
+            # rendering backend fails to initialize (Vulkan vkCreateInstance ->
+            # ERROR_INCOMPATIBLE_DRIVER, traced to permission-denied on all
+            # /dev/dri/* render nodes -- unfixable without root/host-level
+            # config), so Replicator annotators return a genuinely empty
+            # (numel()==0) array for every image modality instead of real
+            # pixels. Substitute a correctly-shaped zero-filled placeholder so
+            # downstream code and the observation_space shape check don't
+            # crash. Real camera pixels will only exist once the pod's device
+            # permissions/driver capabilities are fixed at the infra level.
+            if modality in self._obs_space_mapping and np.asarray(obs[modality]).size == 0:
+                expected_shape, _, _, expected_dtype = self._obs_space_mapping[modality]
+                obs[modality] = np.zeros(expected_shape, dtype=expected_dtype)
+
             if og.sim.device == "cpu":
                 obs[modality] = self._preprocess_cpu_obs(obs[modality], modality)
             elif "cuda" in og.sim.device:
