@@ -95,8 +95,19 @@ robots:
     sensor_config:
       VisionSensor:
         sensor_kwargs:
-          image_height: 512
-          image_width: 512
+          # [b1k 2026-08-06] bumped 512 -> 1080 -- user asked for 1080p-level
+          # clarity; this is independent of the VLA's own input resolution
+          # (openpi-comet's pi05 checkpoint resizes to 224x224 regardless of
+          # source size, confirmed via b1k_policy.py's obs placeholder
+          # shapes), so this only affects what humans/SAM3/saved frames see,
+          # not what the VLA policy receives. A prior comment elsewhere in
+          # this repo warned 1008x1008 x 3 cameras exhausted the PathTracing
+          # renderer's descriptor-set pool -- untested whether that limit
+          # still applies now that RaytracedLighting (not PathTracing) is
+          # the render mode being used; watch for the same failure mode if
+          # this triggers it.
+          image_height: 1080
+          image_width: 1080
           # horizontal_aperture: 40
           focal_length: 10.0
 

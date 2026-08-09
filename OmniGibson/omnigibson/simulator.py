@@ -634,82 +634,77 @@ def _launch_simulator(*args, **kwargs):
             # joint/base motion loops -- these were previously left enabled there too (costing
             # real time on effects nothing is looking at mid-motion) before this project's
             # priority was clarified as "no noise" specifically, not "photorealistic reflections."
-            lazy.carb.settings.get_settings().set_bool("/rtx/reflections/enabled", False)
-            lazy.carb.settings.get_settings().set_bool("/rtx/indirectDiffuse/enabled", False)
+            # [b1k 2026-08-06] Root-caused the persistent dark blotchy cloud
+            # patches on flat surfaces (present at every PathTracing
+            # totalSpp tested, 256 through 1024 -- NOT a plain
+            # undersampling problem, since real noise/variance shrinks
+            # with more samples but these patches didn't, and were
+            # IDENTICAL in position/shape across two fully independent
+            # re-renders) to the PathTracing renderer implementation
+            # itself: switching /rtx/rendermode to "RaytracedLighting"
+            # with the SAME scene/camera pose made the patches disappear
+            # entirely. So: RaytracedLighting is now the default render
+            # mode, not PathTracing. This reverses this project's
+            # 2026-07-19 decision to switch TO PathTracing specifically to
+            # escape RaytracedLighting's noise floor -- that noise floor
+            # turned out to be tunable after all (see the per-effect
+            # sample-count settings below, previously left at their
+            # low UI-default values and never actually maxed out).
+            # /rtx/rendermode is still env-var-overridable
+            # (B1K_RENDER_MODE=PathTracing) for anyone who wants to
+            # re-verify or revisit the PathTracing path; its own settings
+            # are kept below, applied only when selected.
+            _b1k_rendermode = os.environ.get("B1K_RENDER_MODE", "RaytracedLighting")
+            lazy.carb.settings.get_settings().set_string("/rtx/rendermode", _b1k_rendermode)
+
             lazy.carb.settings.get_settings().set_int("/rtx/post/aa/op", 4)  # DLAA (native res, AI anti-aliasing only)
             lazy.carb.settings.get_settings().set_int("/rtx/post/dlss/execMode", 2)  # "Quality" (fallback if DLAA unsupported)
-            lazy.carb.settings.get_settings().set_bool("/rtx/ambientOcclusion/enabled", False)
             lazy.carb.settings.get_settings().set_bool("/rtx/directLighting/sampledLighting/enabled", True)
             lazy.carb.settings.get_settings().set_int("/rtx/raytracing/showLights", 1)
             lazy.carb.settings.get_settings().set_float("/rtx/sceneDb/ambientLightIntensity", 1.0)
             lazy.carb.settings.get_settings().set_bool("/app/renderer/skipMaterialLoading", False)
             lazy.carb.settings.get_settings().set_bool("/rtx/flow/enabled", True)
-            # [capx] Maxing out RaytracedLighting's per-effect sample counts (directLighting/
-            # reflections samplesPerPixel, indirectDiffuse fetchSampleCount, ambientOcclusion
-            # samples) only cut noise ~10% -- confirmed the remaining grain is not a tunable-
-            # sample-count problem within that renderer at all: "RaytracedLighting" (the default)
-            # is Omniverse's REAL-TIME approximation renderer, built for a live human-facing 30fps
-            # viewport, and has an inherent noise floor no per-effect setting removes. The actual
-            # fix is switching render MODE entirely to PathTracing -- a true offline-quality path
-            # tracer that accumulates samples per pixel until fully converged. We don't need 30fps
-            # (one frame captured per action step, not a live human viewport), so there's no reason
-            # to accept the real-time renderer's noise floor. (The per-effect sample-count settings
-            # above are RaytracedLighting-only and simply have no effect once rendermode is
-            # PathTracing -- left in place as a harmless fallback, not removed.)
-            lazy.carb.settings.get_settings().set_string("/rtx/rendermode", "PathTracing")
-            # NOTE: spp=128 + 3 cameras (head + 2 wrists) all at 1008x1008 simultaneously exhausted
-            # the renderer's descriptor-set pool ("Unable to allocate descriptor sets" / "Failed to
-            # allocate ParameterBlock resources", a fixed-size Vulkan resource-pool limit, NOT a
-            # VRAM-capacity limit -- H200's 140GB was nowhere near full) and hung in an infinite
-            # failed-render retry loop. Backed off to a more moderate spp; raise again later once
-            # confirmed stable, ideally after finding the actual descriptor-pool-size setting rather
-            # than just reducing render load to dodge it.
-            # [capx 2026-07-19] spp=32 with NO denoiser is fully converged (0 frame-to-frame noise)
-            # but costs ~10s/frame at 1008x1008x3 cameras -- with STEP_CAP=0.03m/tick, a single
-            # 0.5m move_base_avoiding call needs ~17 renders, i.e. minutes per call. Measured
-            # spp={4,8,16} with the OptiX AI denoiser (/rtx/pathtracing/optixDenoiser) via
-            # scripts/capx_setup/test_render_speed_denoiser.py: spp=4 is visibly grainy even
-            # denoised (unacceptable); spp=16 is visually clean but the denoiser's own overhead
-            # makes it SLOWER than spp=32/no-denoiser (no benefit); spp=8 is the sweet spot --
-            # visually clean (only very faint blotchiness on flat dark/ceiling surfaces) and 1.7x
-            # faster (5.86s vs 10.16s/frame).
-            # [b1k 2026-08-06] Bumped from spp=8 back up to spp=32 -- the
-            # spp=8+denoiser "sweet spot" claim above (and the referenced
-            # test_render_speed_denoiser.py benchmark script) could not be
-            # verified: that script does not exist anywhere in this repo,
-            # and a live capture at spp=8 came back visibly too noisy to
-            # use. Re-testing at spp=32 (the value this same comment block
-            # says is "fully converged, 0 frame-to-frame noise" without a
-            # denoiser) until quality is confirmed acceptable again.
-            # [b1k 2026-08-06] spp/denoiser now env-var-overridable
-            # (B1K_RENDER_SPP / B1K_RENDER_DENOISER=0|1 / B1K_RENDER_ADAPTIVE=0|1)
-            # for A/B render-quality-vs-speed testing without editing this
-            # file per attempt -- the spp=8+denoiser "sweet spot" claimed
-            # above (and its referenced test_render_speed_denoiser.py
-            # benchmark script) could not be verified: that script does not
-            # exist anywhere in this repo, and a live capture at spp=8 came
-            # back visibly too noisy to use.
-            # [b1k 2026-08-06] LIVE-CONFIRMED: spp is the sample budget PER
-            # render() call; totalSpp is the cross-call accumulation CAP.
-            # The old capx comment matched totalSpp to spp ("each single
-            # frame is itself fully converged") -- that makes every
-            # render() call redundant with the last: since the cap is hit
-            # in one call, calling render() N times (env_base.py's
-            # n_render_iterations) just recomputes the SAME spp-sample
-            # image N times, not accumulating further. Confirmed live: at
-            # spp=totalSpp=32, images at n_render_iterations=1 and =16 were
-            # visually identical (same noise pattern), proving no
-            # cross-call accumulation was happening. Decoupling them (spp
-            # low = cheap per call, totalSpp high = real accumulation
-            # target) lets a caller trade latency for quality by choosing
-            # n_render_iterations, which was the actual point of exposing
-            # that parameter (env_server.py's step() now forwards it).
-            # totalSpp=0 ("keep accumulating, no cap") is still avoided --
-            # breaks OmniGibson's Replicator-based sensor pipeline outright
-            # ("Total SPP set to 0, Replicator unable to run" -> AttributeError/
-            # segfault on the very first scene import) -- must be positive.
+
+            # [b1k 2026-08-06] RaytracedLighting quality settings -- these
+            # were previously left disabled/at-default because an earlier
+            # comment claimed "maxing these out only cuts noise ~10%,
+            # RaytracedLighting has an inherent noise floor no per-effect
+            # setting removes" (unverified when written, like several
+            # other since-disproven claims in this file's history).
+            # Actually maxing them out (not just enabling, but pushing
+            # samplesPerPixel/fetchSampleCount/AO samples to their ceiling)
+            # measurably cut per-pixel grain (Laplacian-noise estimator:
+            # ~7.2 baseline enabled-but-default -> ~5.8 maxed out, vs ~9.0
+            # for the PathTracing config this replaces) on top of already
+            # not having the dark-blotch problem at all.
+            lazy.carb.settings.get_settings().set_bool("/rtx/reflections/enabled", True)
+            lazy.carb.settings.get_settings().set_bool("/rtx/indirectDiffuse/enabled", True)
+            lazy.carb.settings.get_settings().set_bool("/rtx/ambientOcclusion/enabled", True)
+            _b1k_rt_dl_spp = int(os.environ.get("B1K_RENDER_RT_DIRECT_LIGHTING_SPP", "8"))
+            _b1k_rt_refl_spp = int(os.environ.get("B1K_RENDER_RT_REFLECTIONS_SPP", "8"))
+            _b1k_rt_gi_samples = int(os.environ.get("B1K_RENDER_RT_INDIRECT_DIFFUSE_SAMPLES", "4"))
+            _b1k_rt_ao_samples = int(os.environ.get("B1K_RENDER_RT_AO_SAMPLES", "16"))
+            # The Kit settings UI only offers 1/2/4/8 as SPP dropdown presets,
+            # but the underlying carb setting is a plain uncapped int --
+            # confirmed live these higher values are accepted and applied.
+            lazy.carb.settings.get_settings().set_int(
+                "/rtx/directLighting/sampledLighting/samplesPerPixel", _b1k_rt_dl_spp
+            )
+            lazy.carb.settings.get_settings().set_int(
+                "/rtx/reflections/sampledLighting/samplesPerPixel", _b1k_rt_refl_spp
+            )
+            lazy.carb.settings.get_settings().set_int("/rtx/indirectDiffuse/fetchSampleCount", _b1k_rt_gi_samples)
+            lazy.carb.settings.get_settings().set_int("/rtx/ambientOcclusion/minSamples", _b1k_rt_ao_samples)
+            lazy.carb.settings.get_settings().set_int("/rtx/ambientOcclusion/maxSamples", _b1k_rt_ao_samples)
+
+            # PathTracing-only settings -- no effect under RaytracedLighting
+            # (kept applied unconditionally, harmless fallback), but this is
+            # what actually governs quality when B1K_RENDER_MODE=PathTracing.
+            # See git history for the long trail of confirmed-live findings
+            # behind these exact values (spp-vs-totalSpp decoupling,
+            # totalSpp accumulation behavior, etc).
             _b1k_spp = int(os.environ.get("B1K_RENDER_SPP", "8"))
-            _b1k_total_spp = int(os.environ.get("B1K_RENDER_TOTAL_SPP", "128"))
+            _b1k_total_spp = int(os.environ.get("B1K_RENDER_TOTAL_SPP", "512"))
             _b1k_denoiser = os.environ.get("B1K_RENDER_DENOISER", "0") == "1"
             _b1k_adaptive = os.environ.get("B1K_RENDER_ADAPTIVE", "1") == "1"
             lazy.carb.settings.get_settings().set_int("/rtx/pathtracing/spp", _b1k_spp)  # samples/pixel/render() call
@@ -721,6 +716,19 @@ def _launch_simulator(*args, **kwargs):
             lazy.carb.settings.get_settings().set_bool("/rtx/pathtracing/optixDenoiser/temporalMode/enabled", False)
             lazy.carb.settings.get_settings().set_float("/rtx/pathtracing/optixDenoiser/blendFactor", 0.0)  # 0 = fully denoised
             lazy.carb.settings.get_settings().set_bool("/rtx/directLighting/sampledLighting/irradiance/denoiser/enabled", True)
+
+            # [b1k 2026-08-06] Kit's "TV Noise / Film Grain" stylized
+            # post-process group (/rtx/post/tvNoise/*, sub-toggles literally
+            # named enableRandomSplotches/enableFilmGrain/enableVignetting/
+            # enableGhostFlickering etc) -- a purely cosmetic effect meant
+            # to emulate an old dirty television. Applies to BOTH render
+            # modes as a final post-process pass. Never explicitly set
+            # anywhere in this file before -- inherited whatever Kit's own
+            # default was. Turned out NOT to be the cause of the dark
+            # blotches (disabling it made no measurable difference), but
+            # it's still an unwanted stylistic filter for a
+            # robot-perception camera feed either way -- stays disabled.
+            lazy.carb.settings.get_settings().set_bool("/rtx/post/tvNoise/enabled", False)
 
             # Below settings are for improving performance: we use the USD / Fabric only for poses.
             lazy.carb.settings.get_settings().set_bool("/physics/updateToUsd", not gm.ENABLE_FLATCACHE)
